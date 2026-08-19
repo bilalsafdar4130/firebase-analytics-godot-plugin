@@ -57,8 +57,22 @@ class FirebaseAnalyticsBridge(godot: Godot) : GodotPlugin(godot) {
 
 	override fun getPluginName(): String = PLUGIN_NAME
 
+	/** Grabs the SDK handle on the main thread at activity creation — the
+	 * ordinary path, and see [start] for why it is not the only one. */
+	override fun onMainCreate(activity: Activity?): View? {
+		start(activity)
+		return super.onMainCreate(activity)
+	}
+
 	/**
-	 * Grabs the SDK handle once, on the main thread, at activity creation.
+	 * Takes the SDK handle if it does not already have one, and records why not.
+	 *
+	 * Called from [onMainCreate] and again from the first [logEvent] that finds
+	 * no handle, which is the point: [onMainCreate] is an engine callback, and a
+	 * plugin whose only chance to initialise is a callback that did not fire (or
+	 * fired before the app's Firebase provider had run) is a plugin that reports
+	 * nothing for the life of the process with no way back. Retrying on use
+	 * costs one null check per event and removes that whole failure mode.
 	 *
 	 * `FirebaseAnalytics.getInstance` is what fails when the app carries the SDK
 	 * but no configuration — `google_app_id` and `google_api_key` come from
@@ -67,19 +81,24 @@ class FirebaseAnalyticsBridge(godot: Godot) : GodotPlugin(godot) {
 	 * than a hypothetical, so it is caught and named here instead of thrown
 	 * through the engine's activity callback.
 	 */
-	override fun onMainCreate(activity: Activity?): View? {
+	private fun start(activity: Activity? = null) {
+		if (analytics != null) {
+			return
+		}
 		try {
 			val context = activity ?: getActivity()
 			if (context == null) {
 				failure = "no activity to initialise against"
 			} else {
 				analytics = FirebaseAnalytics.getInstance(context)
+				if (analytics != null) {
+					failure = ""
+				}
 			}
 		} catch (error: Throwable) {
 			failure = describe(error)
 			Log.e(TAG, "Firebase Analytics could not start", error)
 		}
-		return super.onMainCreate(activity)
 	}
 
 	/**
@@ -91,7 +110,10 @@ class FirebaseAnalyticsBridge(godot: Godot) : GodotPlugin(godot) {
 	 */
 	@UsedByGodot
 	fun logEvent(event: String, params: Dictionary) {
-		val sdk = analytics ?: return
+		val sdk = analytics ?: run {
+			start()
+			analytics
+		} ?: return
 		try {
 			sdk.logEvent(event, toBundle(params))
 		} catch (error: Throwable) {
@@ -102,7 +124,10 @@ class FirebaseAnalyticsBridge(godot: Godot) : GodotPlugin(godot) {
 
 	@UsedByGodot
 	fun setUserProperty(name: String, value: String) {
-		val sdk = analytics ?: return
+		val sdk = analytics ?: run {
+			start()
+			analytics
+		} ?: return
 		try {
 			sdk.setUserProperty(name, value.take(MAX_PARAM_CHARS))
 		} catch (error: Throwable) {
@@ -111,10 +136,18 @@ class FirebaseAnalyticsBridge(godot: Godot) : GodotPlugin(godot) {
 		}
 	}
 
-	/** Whether the SDK actually started. A plugin that is PRESENT and a plugin
-	 * that is WORKING look identical from GDScript without this. */
+	/**
+	 * Whether the SDK actually started. A plugin that is PRESENT and a plugin
+	 * that is WORKING look identical from GDScript without this.
+	 *
+	 * Retries first, so asking the question from a diagnostics screen is also a
+	 * second chance to answer it yes.
+	 */
 	@UsedByGodot
-	fun isReady(): Boolean = analytics != null
+	fun isReady(): Boolean {
+		start()
+		return analytics != null
+	}
 
 	/** The last failure, for a diagnostics screen — "" when there has been none. */
 	@UsedByGodot
