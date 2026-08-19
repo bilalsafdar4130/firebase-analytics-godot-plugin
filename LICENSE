@@ -1,0 +1,32 @@
+Copyright © 2026 Bilal Safdar. All rights reserved.
+
+This addon — the GDScript export plugin, the Kotlin bridge, the Gradle project
+and the build script in this folder — is original work owned by Bilal Safdar.
+It is not open-source software: no permission is granted to any person to use,
+copy, modify, publish, distribute, sublicense or sell it, in whole or in part,
+except by the Owner's prior express written consent.
+
+It is deliberately kept self-contained so the Owner can reuse it across their
+own projects. Copying it into another of the Owner's projects is expressly
+permitted; copying it out to anyone else is not.
+
+THIRD-PARTY COMPONENTS THIS ADDON TALKS TO, and which are not covered here:
+
+  Firebase SDK for Android (com.google.firebase:firebase-analytics)
+      Apache License 2.0, plus Google's Firebase terms. Not redistributed by
+      this addon: it is declared as a dependency and fetched by the app's own
+      Gradle build.
+
+  Godot Engine Android library (org.godotengine:godot)
+      MIT. Not redistributed either — the bridge compiles against the library
+      already present in the Godot Android build template, and the engine
+      supplies it at runtime.
+
+Neither is bundled into the AAR this folder produces, and neither places any
+restriction on the ownership stated above.
+
+THE ADDON IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH IT.
+
+Bilal Safdar — bilalsafdar3014@gmail.com
