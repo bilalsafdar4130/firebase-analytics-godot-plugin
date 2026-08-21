@@ -137,6 +137,105 @@ class FirebaseAnalyticsBridge(godot: Godot) : GodotPlugin(godot) {
 	}
 
 	/**
+	 * Turns the SDK's own collection on or off, automatic events included.
+	 *
+	 * This is the lever [logEvent] cannot pull. `session_start`, `first_open`,
+	 * `app_update` and `screen_view` are collected by the SDK itself and never
+	 * pass through GDScript, so a game that refuses to SEND events is still a
+	 * game the SDK is quietly reporting for. A player who said no meant no to
+	 * those too.
+	 *
+	 * The setting persists across launches — the SDK stores it — which is why
+	 * the manifest can default everything to denied without costing analytics
+	 * anything beyond a first session.
+	 */
+	@UsedByGodot
+	fun setAnalyticsCollectionEnabled(enabled: Boolean) {
+		val sdk = analytics ?: run {
+			start()
+			analytics
+		} ?: return
+		try {
+			sdk.setAnalyticsCollectionEnabled(enabled)
+		} catch (error: Throwable) {
+			failure = describe(error)
+			Log.e(TAG, "setAnalyticsCollectionEnabled($enabled) failed", error)
+		}
+	}
+
+	/**
+	 * Google Consent Mode: which storage the SDK may use, one flag per type.
+	 *
+	 * Four booleans rather than a map because Godot's JNI bridge marshals
+	 * primitives and strings, not typed Kotlin enums — and four named
+	 * parameters read better at the call site than a dictionary whose keys are
+	 * spelled correctly only by luck.
+	 *
+	 * Ad storage, ad user data and ad personalisation are separate from
+	 * analytics storage on purpose: this game asks for analytics and, today,
+	 * for no advertising at all, so the three ad flags arrive denied from a
+	 * caller that has never had a reason to grant them.
+	 */
+	@UsedByGodot
+	fun setConsent(
+		analyticsStorage: Boolean,
+		adStorage: Boolean,
+		adUserData: Boolean,
+		adPersonalization: Boolean
+	) {
+		val sdk = analytics ?: run {
+			start()
+			analytics
+		} ?: return
+		try {
+			sdk.setConsent(
+				mapOf(
+					FirebaseAnalytics.ConsentType.ANALYTICS_STORAGE to
+						consentStatus(analyticsStorage),
+					FirebaseAnalytics.ConsentType.AD_STORAGE to
+						consentStatus(adStorage),
+					FirebaseAnalytics.ConsentType.AD_USER_DATA to
+						consentStatus(adUserData),
+					FirebaseAnalytics.ConsentType.AD_PERSONALIZATION to
+						consentStatus(adPersonalization)
+				)
+			)
+		} catch (error: Throwable) {
+			failure = describe(error)
+			Log.e(TAG, "setConsent failed", error)
+		}
+	}
+
+	private fun consentStatus(granted: Boolean): FirebaseAnalytics.ConsentStatus =
+		if (granted) {
+			FirebaseAnalytics.ConsentStatus.GRANTED
+		} else {
+			FirebaseAnalytics.ConsentStatus.DENIED
+		}
+
+	/**
+	 * Throws away the app instance identifier, so nothing sent afterwards can
+	 * be joined to anything sent before.
+	 *
+	 * The game calls this from its "delete my data" — there is no account to
+	 * close, so the save file and this identifier are the whole of what a
+	 * player can ask to have erased.
+	 */
+	@UsedByGodot
+	fun resetAnalyticsData() {
+		val sdk = analytics ?: run {
+			start()
+			analytics
+		} ?: return
+		try {
+			sdk.resetAnalyticsData()
+		} catch (error: Throwable) {
+			failure = describe(error)
+			Log.e(TAG, "resetAnalyticsData failed", error)
+		}
+	}
+
+	/**
 	 * Whether the SDK actually started. A plugin that is PRESENT and a plugin
 	 * that is WORKING look identical from GDScript without this.
 	 *

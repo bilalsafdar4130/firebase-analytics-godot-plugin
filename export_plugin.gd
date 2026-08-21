@@ -47,6 +47,13 @@ func _exit_tree() -> void:
 
 class FirebaseAndroidExportPlugin extends EditorExportPlugin:
 
+	## The client config computed in `_export_begin`, waiting for the first
+	## `_export_file` call to put it into the package. `add_file` is only
+	## legal from inside `_export_file`, which is why this is a member rather
+	## than a local.
+	var _client_config_text: String = ""
+	var _client_config_added: bool = false
+
 	## Where the generated resources land inside the Gradle build, and the
 	## marker identifying them as ours. One file, always rewritten, never merged.
 	const RESOURCE_FILE := "res/values/firebase_analytics_bridge.xml"
@@ -60,6 +67,23 @@ class FirebaseAndroidExportPlugin extends EditorExportPlugin:
 		"com.google.firebase:firebase-analytics",
 	]
 
+	## Where the GDScript side of the app finds the same Firebase values the
+	## native SDK reads out of Android resources.
+	##
+	## WHY A SECOND COPY. Android string resources are invisible to GDScript, so
+	## anything the game wants to talk to over Firebase's REST APIs (this
+	## project's global leaderboard, for one) cannot get at the project's API
+	## key or database URL at all. This writes the handful of values that are
+	## PUBLIC by design — a Firebase Web API key identifies a project, it does
+	## not authorise anything on its own; access is decided by database rules —
+	## into the exported package as an ordinary ConfigFile.
+	##
+	## It is generated at export time from google-services.json, which is a CI
+	## secret and not in the repository, so no key is committed here and a build
+	## made without the secret simply carries no file. Anything reading it must
+	## degrade gracefully when it is absent; `Leaderboard` does.
+	const CLIENT_CONFIG_PATH := "res://firebase_client.cfg"
+
 	## The built bridge, relative to the project's `addons/` directory — which
 	## is what Godot resolves `_get_android_libraries` against.
 	const PLUGIN_AAR := "firebase_analytics/bin/release/firebase-analytics-bridge-release.aar"
@@ -67,6 +91,44 @@ class FirebaseAndroidExportPlugin extends EditorExportPlugin:
 
 	func _get_name() -> String:
 		return "FirebaseAnalyticsBridge"
+
+	## FIREBASE'S OWN PRIVACY SWITCHES, written into the manifest.
+	##
+	## These are read by the Firebase SDK itself, before any of the app's code
+	## runs — which is the point. `firebase-common` ships a ContentProvider that
+	## starts Analytics before the first Activity, so the app's first chance to
+	## say "not yet" in GDScript is already several automatic events late. A
+	## manifest default is the only thing that can be in place before that.
+	##
+	## Every one of them is a DENY, and the runtime grants what it may:
+	## `Analytics.apply_consent()` calls `setAnalyticsCollectionEnabled` and
+	## `setConsent` as soon as the bridge is detected, with what
+	## `Compliance` allows for this player and this region. Both of those SDK
+	## calls PERSIST across launches, so the defaults below decide the first
+	## session only, and decide it in the safe direction.
+	##
+	## THE AD-ID LINE IS THE LOUD ONE. Firebase Analytics collects the Android
+	## advertising ID by default, and that single default is what puts
+	## "Advertising ID" in a Play Data Safety declaration, drags an app into the
+	## AD_ID permission, and makes an ad-free build look like an ad build. This
+	## game shows no ads at all (`Monetize.ADS_ENABLED`), so it collects no
+	## advertising ID, and this is where that becomes true rather than merely
+	## intended.
+	const PRIVACY_META := {
+		"google_analytics_adid_collection_enabled": "false",
+		"google_analytics_ssaid_collection_enabled": "false",
+		"google_analytics_default_allow_analytics_storage": "false",
+		"google_analytics_default_allow_ad_storage": "false",
+		"google_analytics_default_allow_ad_user_data": "false",
+		"google_analytics_default_allow_ad_personalization_signals": "false",
+	}
+
+	## The permission that comes with `firebase-analytics` and is removed again
+	## here. An app that does not read the advertising ID must not ASK for it:
+	## Play's data safety form treats a declared AD_ID permission as a
+	## declaration that the ID is collected, and a mismatch between the two is a
+	## policy rejection.
+	const AD_ID_PERMISSION := "com.google.android.gms.permission.AD_ID"
 
 	## Android only, and only when there is something to configure Firebase
 	## WITH. Standing down when google-services.json is absent is what lets a
@@ -126,6 +188,24 @@ class FirebaseAndroidExportPlugin extends EditorExportPlugin:
 	) -> PackedStringArray:
 		return PackedStringArray(FIREBASE_DEPENDENCIES)
 
+	## Godot inserts what this returns as children of `<manifest>`. One line,
+	## and it takes a permission back OUT: see `AD_ID_PERMISSION`.
+	##
+	## `tools:node="remove"` is the manifest merger's own mechanism for
+	## deleting an element an included library declared, and this manifest
+	## outranks every AAR in the merge.
+	func _get_android_manifest_element_contents(
+		_platform: EditorExportPlatform, _debug: bool
+	) -> String:
+		return ad_id_removal_xml()
+
+	## ...and this one as children of `<application>`: the privacy defaults the
+	## SDK reads before the app has run a line of its own code.
+	func _get_android_manifest_application_element_contents(
+		_platform: EditorExportPlatform, _debug: bool
+	) -> String:
+		return privacy_meta_xml()
+
 	## Writes the string resources the SDK initialises from. Runs before Gradle,
 	## into a directory Gradle already treats as a resource root.
 	func _export_begin(
@@ -169,6 +249,23 @@ class FirebaseAndroidExportPlugin extends EditorExportPlugin:
 			"[firebase_analytics] wrote %d Firebase resources for %s"
 			% [int(result["values"].size()), package_name]
 		)
+		# ...and the same values again, in a form GDScript can read. See
+		# CLIENT_CONFIG_PATH.
+		_client_config_text = client_config_text(result["values"])
+		_client_config_added = false
+
+	## Puts the client config into the package. `add_file` may only be called
+	## from here, so the first file the exporter offers is the hook — which file
+	## that is does not matter, only that it happens once.
+	func _export_file(_path: String, _type: String, _features: PackedStringArray) -> void:
+		if _client_config_added or _client_config_text.is_empty():
+			return
+		_client_config_added = true
+		add_file(CLIENT_CONFIG_PATH, _client_config_text.to_utf8_buffer(), false)
+
+	func _export_end() -> void:
+		_client_config_text = ""
+		_client_config_added = false
 
 	# --- The pure half: google-services.json in, Android resources out --------
 	#
@@ -177,6 +274,57 @@ class FirebaseAndroidExportPlugin extends EditorExportPlugin:
 	# The whole integration turns on these values being right, and "wrong
 	# Firebase project" is indistinguishable from "no players" once a build has
 	# shipped.
+
+	## The client config's text, from the same values the Android resources are
+	## built from. Pure, so tools/verify_compliance.gd can check it without an
+	## export — a leaderboard that silently ships without its database URL looks
+	## exactly like a leaderboard nobody uses.
+	static func client_config_text(values: Dictionary) -> String:
+		var lines := PackedStringArray([
+			"; Generated at export time by the firebase_analytics addon from",
+			"; google-services.json. These values identify the Firebase project;",
+			"; they authorise nothing on their own - database rules do that.",
+			"; Do not commit a copy of this file: it is written into the package,",
+			"; never into the repository.",
+			"",
+			"[firebase]",
+		])
+		for key in ["google_api_key", "firebase_database_url", "project_id", "google_app_id"]:
+			lines.append('%s="%s"' % [key, str(values.get(key, ""))])
+		lines.append("")
+		return "\n".join(lines)
+
+	## The `<meta-data>` block, one element per privacy default.
+	##
+	## Static and pure so tools/verify_compliance.gd can assert on the exact
+	## strings without running an export — the same reasoning the resource
+	## generation next door is built on. A privacy default that silently stopped
+	## being written would look identical to one that was never needed.
+	static func privacy_meta_xml() -> String:
+		var lines := PackedStringArray([
+			"        <!-- Generated by the firebase_analytics addon: Firebase's own",
+			"             privacy defaults, all denied. The app grants what it may at",
+			"             runtime through Analytics.apply_consent(). -->",
+		])
+		var names := PRIVACY_META.keys()
+		names.sort()
+		for name in names:
+			lines.append(
+				'        <meta-data android:name="%s" android:value="%s" />'
+				% [name, PRIVACY_META[name]]
+			)
+		lines.append("")
+		return "\n".join(lines)
+
+	## The one-line removal of the advertising-ID permission the SDK brings in.
+	static func ad_id_removal_xml() -> String:
+		return "\n".join(PackedStringArray([
+			"    <!-- Generated by the firebase_analytics addon: this build reads no",
+			"         advertising ID, so it does not ask for one either. -->",
+			'    <uses-permission tools:node="remove" android:name="%s" />'
+			% AD_ID_PERMISSION,
+			"",
+		]))
 
 	## Pulls the values Firebase initialises from out of a parsed
 	## google-services.json.
