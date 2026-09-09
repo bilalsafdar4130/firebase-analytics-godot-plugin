@@ -95,6 +95,15 @@ Nothing in GDScript's public API, the config format or any game changes.
    [`docs/configuration.md`](docs/configuration.md).
 6. Add whatever is pure to `tests/`.
 
+## The Android toolchain is the engine's, not ours
+
+AGP, Gradle, Kotlin, compileSdk and minSdk in `android/build.gradle.kts` are
+copied from Godot's own template (`platform/android/java/app/config.gradle` at
+the tag this addon targets). Do not raise them independently: the build runs on
+the template's Gradle wrapper, and an AAR built with a newer AGP than the app's
+is rejected by the *game's* build rather than this one. See
+[`docs/versions.md`](docs/versions.md#why-those-exact-android-versions).
+
 ## Bumping a dependency
 
 Two places, together, or the bridge compiles against an SDK the app does not

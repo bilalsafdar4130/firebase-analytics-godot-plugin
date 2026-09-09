@@ -93,6 +93,12 @@ class MobileServicesCorePlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	 */
 	@UsedByGodot
 	fun isNetworkAvailable(): Boolean = safelyReturn("isNetworkAvailable", false) {
+		// `activeNetwork` is API 23. The modules build at the engine's floor of
+		// 21, so the two versions below that would throw NoSuchMethodError at
+		// runtime rather than fail at compile time — the worst way round.
+		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+			return@safelyReturn false
+		}
 		val manager = getActivity()
 			?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 			?: return@safelyReturn false

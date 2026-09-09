@@ -1,25 +1,34 @@
 import com.android.build.gradle.LibraryExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 // Shared configuration for every module, stated once.
 //
-// TOOLCHAIN VERSIONS MATCH GODOT'S OWN ANDROID BUILD TEMPLATE (its
-// config.gradle: AGP 8.6.1, Kotlin 2.1.21, compileSdk 36, Java 17), so these
-// plugins compile with the same toolchain the app around them does — one set of
-// downloads, one set of behaviours, no version pair that exists only here.
+// EVERY VERSION BELOW IS COPIED FROM THE ENGINE'S OWN ANDROID TEMPLATE
+// (platform/android/java/app/config.gradle at the Godot tag this addon targets:
+// AGP 8.2.0, Gradle 8.2, Kotlin 1.9.20, compileSdk 34, minSdk 21, Java 17).
 //
-// The plugins are put on the buildscript classpath rather than declared with
-// versions in each module, so a version can only be stated once. Modules then
-// say `id("com.android.library")` with no version and get this one.
+// THIS IS A HARD CONSTRAINT, NOT A PREFERENCE. Two reasons, and the second is
+// the one that bites:
+//
+//  1. The build script drives these modules with the WRAPPER FROM THE TEMPLATE,
+//     so Gradle's version is the engine's. AGP 8.6 refuses to run on Gradle 8.2
+//     — "Minimum supported Gradle version is 8.7" — and the build stops there.
+//
+//  2. An AAR records the minimum AGP that may consume it. A plugin built with a
+//     newer AGP than the app's is rejected by the APP'S build, long after this
+//     one succeeded, with an error that names neither this addon nor the reason.
+//
+// So on a Godot upgrade: read that config.gradle for the new version and move
+// these to match. docs/versions.md says the same thing in prose.
 buildscript {
 	repositories {
 		google()
 		mavenCentral()
 	}
 	dependencies {
-		classpath("com.android.tools.build:gradle:8.6.1")
-		classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.21")
+		classpath("com.android.tools.build:gradle:8.2.0")
+		classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.20")
 	}
 }
 
@@ -39,12 +48,15 @@ subprojects {
 	apply(plugin = "org.jetbrains.kotlin.android")
 
 	extensions.configure<LibraryExtension>("android") {
-		compileSdk = 36
+		compileSdk = 34
 		defaultConfig {
-			// At or below the host app's floor — a library that demands more
-			// than the app does fails the manifest merge. 24 is Godot 4.x's own
-			// default and the floor for Play Billing 7 and Play Games v2.
-			minSdk = 24
+			// AT OR BELOW THE HOST APP'S FLOOR. A library that demands more than
+			// the app does fails the app's manifest merge, and 21 is what Godot's
+			// template defaults to. The ad and billing SDKs have floors of their
+			// own, but they arrive as dependencies of the APP — so a game that
+			// enables them raises its own export preset's Min SDK, and this
+			// number never has to move. See docs/versions.md.
+			minSdk = 21
 			// Names the output mobile-services-<module>-<variant>.aar, which is
 			// exactly what the export plugin looks for.
 			setProperty("archivesBaseName", "mobile-services-${project.name}")
@@ -55,8 +67,8 @@ subprojects {
 			targetCompatibility = JavaVersion.VERSION_17
 		}
 		buildTypes {
-			// No minification here: these are a few dozen small classes, and
-			// the app's own build is what decides shrinking. Each module ships
+			// No minification here: these are a few dozen small classes, and the
+			// app's own build is what decides shrinking. Each module ships
 			// consumer-rules.pro so the app's R8 keeps what Godot reaches by
 			// reflection.
 			getByName("release") { isMinifyEnabled = false }
@@ -69,12 +81,12 @@ subprojects {
 		}
 	}
 
-	extensions.configure<KotlinAndroidProjectExtension>("kotlin") {
+	// Set on the TASKS rather than through the `kotlin { compilerOptions { } }`
+	// extension, which only arrived in Kotlin 2.0. This form works on 1.9 and on
+	// 2.x, so following the engine's Kotlin version needs no change here.
+	tasks.withType<KotlinCompile>().configureEach {
 		compilerOptions {
 			jvmTarget.set(JvmTarget.JVM_17)
-			// The bridge deals in nullable values from three different SDKs;
-			// warnings here are signal, not noise.
-			allWarningsAsErrors.set(false)
 		}
 	}
 

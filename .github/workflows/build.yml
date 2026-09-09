@@ -113,8 +113,8 @@ jobs:
         # but only sometimes and never predictably — an explicit install turns
         # "the build failed on a fresh runner" into a step with a name.
         run: |
-          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" > /dev/null
-          sdkmanager --list_installed | grep -E 'platforms;android-36|build-tools;36'
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          sdkmanager --list_installed | grep -E 'platforms;android-34|build-tools;34'
 
       - name: Install Godot and its export templates
         run: |

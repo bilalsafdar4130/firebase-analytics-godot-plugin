@@ -93,7 +93,7 @@ Adding this SDK to a fourth game is copying a folder and writing that file.
 | | |
 |---|---|
 | Godot | 4.3 – 4.5 (developed against 4.4) |
-| Android | minSdk 24, targetSdk 34+, `arm64-v8a` and `armeabi-v7a` |
+| Android | minSdk 21, compileSdk 34, `arm64-v8a` and `armeabi-v7a` |
 | iOS | 14.0+, arm64 |
 | To build the Android plugins | JDK 17, an Android SDK, the Godot Android build template |
 | To build the iOS plugins | macOS, Xcode, SCons, a Godot source checkout |
