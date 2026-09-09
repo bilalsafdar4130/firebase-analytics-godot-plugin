@@ -9,11 +9,20 @@ name: build
 # marked preview for exactly this reason.
 
 on:
+  # `pull_request` already covers every branch that has one open, so `push` is
+  # narrowed to the trunk and to tags. Both together started two identical runs
+  # for every commit on a PR branch — and the Android job is not cheap.
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
+# A new commit makes the run before it irrelevant. Without this they queue up
+# behind each other and the answer you want arrives last.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   # Must match the version games export with; the plugins compile against the
@@ -25,6 +34,9 @@ jobs:
   tests:
     name: headless tests
     runs-on: ubuntu-latest
+    # Godot downloads in seconds and the tests run in one. Anything past this is
+    # a hang, and a hang that is allowed to run is billed like work.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -45,8 +57,8 @@ jobs:
         # yet, and exits non-zero on some versions. The run that matters is the
         # second one, and the test run after it.
         run: |
-          godot --headless --import || true
-          godot --headless --import
+          timeout 300 godot --headless --import || true
+          timeout 300 godot --headless --import
 
       - name: Check every script compiles
         # `run_tests.gd` only compiles what it reaches. Everything under
@@ -54,7 +66,7 @@ jobs:
         # a parse error there is one handed straight to somebody else.
         run: |
           set -o pipefail
-          godot --headless --script res://tests/check_scripts.gd 2>&1 | tee compile-output.log
+          timeout 300 godot --headless --script res://tests/check_scripts.gd 2>&1 | tee compile-output.log
           if grep -qE '^(SCRIPT )?ERROR:' compile-output.log; then
             echo "::error::At least one script failed to compile."
             exit 1
@@ -72,7 +84,7 @@ jobs:
         # pure half.
         run: |
           set -o pipefail
-          godot --headless --script res://tests/run_tests.gd 2>&1 | tee test-output.log
+          timeout 300 godot --headless --script res://tests/run_tests.gd 2>&1 | tee test-output.log
           if grep -qE '^(SCRIPT )?ERROR:' test-output.log; then
             echo "::error::Godot logged script errors — the SDK does not compile cleanly."
             grep -nE '^(SCRIPT )?ERROR:' -A 1 test-output.log
@@ -82,6 +94,10 @@ jobs:
   android:
     name: android plugins
     runs-on: ubuntu-latest
+    # Gradle fetching AGP, Kotlin and five SDKs from cold runs to about ten
+    # minutes. Twice that is a hang, not a slow build — and the step that hung
+    # before this ceiling existed ran until the runner's own limit.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -117,14 +133,42 @@ jobs:
             "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}/"
 
       - name: Install the Android build template
-        # The plugins compile against the ENGINE'S OWN library, extracted from
-        # this template by tools/build_android.sh. That is why there is no
-        # `org.godotengine:godot` Maven version pinned anywhere.
+        # DONE BY HAND, NOT BY THE EDITOR. `godot --headless
+        # --install-android-build-template` hung indefinitely on this runner —
+        # it starts the editor, and a headless editor with nothing to draw to
+        # does not reliably reach the point where the tool runs and quits.
+        #
+        # The operation it performs is not complicated: unzip `android_source.zip`
+        # out of the installed export templates into `res://android/build`, and
+        # drop the .gdignore files that keep the engine from importing a Gradle
+        # project as game assets. Doing it directly takes two seconds and cannot
+        # hang.
+        #
+        # The plugins compile against the ENGINE'S OWN library out of that
+        # template, which is why there is no `org.godotengine:godot` Maven
+        # version pinned anywhere in this repository.
         run: |
           set -euo pipefail
-          godot --headless --import || true
-          godot --headless --install-android-build-template
-          test -f android/build/gradlew
+          TEMPLATES="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}"
+          test -f "$TEMPLATES/android_source.zip" || {
+            echo "::error::android_source.zip is not in $TEMPLATES"
+            ls -la "$TEMPLATES" || true
+            exit 1
+          }
+          mkdir -p android/build
+          unzip -q -o "$TEMPLATES/android_source.zip" -d android/build
+          : > android/.gdignore
+          : > android/build/.gdignore
+          test -f android/build/gradlew || {
+            echo "::error::no gradlew in the unpacked build template"
+            find android/build -maxdepth 2 | head -50
+            exit 1
+          }
+          # The build script needs the engine library. Report what is actually
+          # there if it is somewhere else, so one run answers the question
+          # instead of a guess.
+          echo "engine libraries in the template:"
+          find android/build -name '*.aar' | sed 's/^/  /'
 
       - name: Build every module
         run: |

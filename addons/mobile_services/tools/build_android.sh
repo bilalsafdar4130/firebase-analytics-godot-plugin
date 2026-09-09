@@ -67,8 +67,21 @@ if [ ! -f "$GRADLEW" ]; then
 	exit 1
 fi
 
+# The engine library's exact filename has moved between Godot versions
+# (godot-lib.template_release.aar, godot-lib.release.aar, and a debug variant on
+# templates installed for debug only). Fall back to whichever one is there
+# rather than failing on a path that is right for one version of the engine.
 if [ ! -f "$GODOT_LIB_AAR" ]; then
-	echo "error: $GODOT_LIB_AAR is missing from the build template." >&2
+	GODOT_LIB_AAR="$(find "$BUILD_TEMPLATE" -name 'godot-lib*.aar' 2>/dev/null | sort | tail -1)"
+fi
+
+if [ -z "$GODOT_LIB_AAR" ] || [ ! -f "$GODOT_LIB_AAR" ]; then
+	echo "error: no godot-lib*.aar in $BUILD_TEMPLATE" >&2
+	echo "       The plugins compile against the engine's own Android library," >&2
+	echo "       which ships inside the Android build template. Reinstall it:" >&2
+	echo "       Project ▸ Install Android Build Template." >&2
+	echo "       What is actually there:" >&2
+	find "$BUILD_TEMPLATE" -maxdepth 3 -name '*.aar' 2>/dev/null | sed 's/^/         /' >&2
 	exit 1
 fi
 
