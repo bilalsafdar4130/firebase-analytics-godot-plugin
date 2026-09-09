@@ -1,0 +1,20 @@
+; Firebase Analytics, Crashlytics and Remote Config.
+;
+; The Firebase iOS SDK is NOT bundled here — it is many megabytes and updates on
+; its own schedule. Add it to the generated Xcode project with CocoaPods or Swift
+; Package Manager; docs/ios.md has the Podfile lines. `linked` below names what
+; the plugin expects to find.
+[config]
+name="MobileServicesFirebase"
+binary="mobile_services_firebase.release.xcframework"
+initialization="ms_firebase_init"
+deinitialization="ms_firebase_deinit"
+
+[dependencies]
+linked=[]
+embedded=[]
+system=["Foundation.framework", "UIKit.framework"]
+capabilities=[]
+files=[]
+
+[plist]

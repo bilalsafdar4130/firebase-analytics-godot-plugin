@@ -1,0 +1,15 @@
+; StoreKit purchases. No third-party SDK: StoreKit is part of iOS.
+[config]
+name="MobileServicesBilling"
+binary="mobile_services_billing.release.xcframework"
+initialization="ms_billing_init"
+deinitialization="ms_billing_deinit"
+
+[dependencies]
+linked=[]
+embedded=[]
+system=["Foundation.framework", "StoreKit.framework"]
+capabilities=["in-app-purchase"]
+files=[]
+
+[plist]

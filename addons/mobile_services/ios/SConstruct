@@ -1,0 +1,87 @@
+#!/usr/bin/env python
+"""SCons build for the Mobile Services iOS plugins.
+
+ONE MODULE PER INVOCATION, driven by tools/build_ios.sh:
+
+    scons module=ads target=release godot_source=/path/to/godot arch=arm64 simulator=no
+
+WHY IT NEEDS THE GODOT SOURCE. A Godot iOS plugin is a static library that
+subclasses the engine's own `Object` and calls into `Engine`, `ClassDB` and
+`String`. Those are C++ headers that ship only in the engine's source tree, and
+they change between engine versions — so the plugin must be compiled against the
+same version the game exports with. There is no binary SDK to link against
+instead.
+"""
+
+import os
+
+MODULES = {
+    "core": ["src/core/ms_core.mm", "src/core/ms_core_module.mm"],
+    "firebase": ["src/firebase/ms_firebase.mm", "src/firebase/ms_firebase_module.mm"],
+    "ads": ["src/ads/ms_ads.mm", "src/ads/ms_ads_module.mm"],
+    "billing": ["src/billing/ms_billing.mm", "src/billing/ms_billing_module.mm"],
+    "gamecenter": ["src/gamecenter/ms_gamecenter.mm", "src/gamecenter/ms_gamecenter_module.mm"],
+    "consent": ["src/consent/ms_consent.mm", "src/consent/ms_consent_module.mm"],
+}
+
+opts = Variables([], ARGUMENTS)
+opts.Add(EnumVariable("module", "Which plugin to build", "core", list(MODULES)))
+opts.Add(EnumVariable("target", "Build variant", "release", ["debug", "release"]))
+opts.Add(PathVariable("godot_source", "A Godot source checkout", "", PathVariable.PathAccept))
+opts.Add(EnumVariable("arch", "Target architecture", "arm64", ["arm64", "x86_64"]))
+opts.Add(BoolVariable("simulator", "Build the simulator slice", False))
+# Extra include roots for SDK headers the plugin compiles against but does not
+# ship — Firebase and Google Mobile Ads, installed with CocoaPods or SPM.
+opts.Add("sdk_includes", "Colon-separated extra include directories", "")
+
+env = Environment(tools=["default"], ENV=os.environ)
+opts.Update(env)
+Help(opts.GenerateHelpText(env))
+
+if not env["godot_source"]:
+    raise SystemExit("godot_source= is required; see tools/build_ios.sh")
+
+sdk = "iphonesimulator" if env["simulator"] else "iphoneos"
+sdk_path = os.popen("xcrun --sdk %s --show-sdk-path" % sdk).read().strip()
+if not sdk_path:
+    raise SystemExit("could not locate the %s SDK; is Xcode installed?" % sdk)
+
+# `-miphoneos-version-min` must be at or below what the game's export preset
+# targets, or the linker rejects the library. 14.0 is the floor for
+# AppTrackingTransparency, which the consent module needs.
+target_flag = (
+    "-mios-simulator-version-min=14.0" if env["simulator"] else "-miphoneos-version-min=14.0"
+)
+
+env.Append(CPPPATH=[env["godot_source"], "src"])
+for extra in filter(None, env["sdk_includes"].split(":")):
+    env.Append(CPPPATH=[extra])
+
+env.Append(
+    CCFLAGS=[
+        "-fobjc-arc",
+        "-arch", env["arch"],
+        "-isysroot", sdk_path,
+        target_flag,
+        "-fmodules",
+        "-fcxx-modules",
+        # The engine headers assume these; without them the plugin compiles
+        # against a different notion of Godot than the engine was built with and
+        # crashes in ways that make no sense at the call site.
+        "-DIOS_ENABLED",
+        "-DUNIX_ENABLED",
+        "-DAPPLE_STYLE_KEYS",
+    ]
+)
+env.Append(CXXFLAGS=["-std=gnu++17"])
+if env["target"] == "debug":
+    env.Append(CCFLAGS=["-g", "-O0", "-DDEBUG_ENABLED", "-DDEBUG_MEMORY_ALLOC"])
+else:
+    env.Append(CCFLAGS=["-O2"])
+
+module = env["module"]
+suffix = ".simulator" if env["simulator"] else ""
+name = "build/libmobile_services_%s.%s.%s%s" % (module, env["target"], env["arch"], suffix)
+
+sources = ["src/ms_common.mm"] + MODULES[module]
+env.StaticLibrary(target=name, source=sources)

@@ -1,0 +1,20 @@
+; Game Center, registered under the singleton name "MobileServicesPlayGames" so
+; the same GDScript drives it and Android's Play Games. No third-party SDK:
+; GameKit is part of iOS.
+;
+; The app also needs the Game Center capability in its provisioning profile, and
+; leaderboards/achievements configured in App Store Connect.
+[config]
+name="MobileServicesPlayGames"
+binary="mobile_services_gamecenter.release.xcframework"
+initialization="ms_gamecenter_init"
+deinitialization="ms_gamecenter_deinit"
+
+[dependencies]
+linked=[]
+embedded=[]
+system=["Foundation.framework", "UIKit.framework", "GameKit.framework"]
+capabilities=["gamekit"]
+files=[]
+
+[plist]

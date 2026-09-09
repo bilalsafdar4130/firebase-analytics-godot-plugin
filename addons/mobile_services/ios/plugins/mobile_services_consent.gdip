@@ -1,0 +1,19 @@
+; Google UMP consent, plus Apple's App Tracking Transparency prompt.
+;
+; NSUserTrackingUsageDescription is written into Info.plist by the addon's iOS
+; export plugin from consent/att_message in mobile_services.cfg — it is not
+; declared here, because its text belongs to the game rather than to the plugin.
+[config]
+name="MobileServicesConsent"
+binary="mobile_services_consent.release.xcframework"
+initialization="ms_consent_init"
+deinitialization="ms_consent_deinit"
+
+[dependencies]
+linked=[]
+embedded=[]
+system=["Foundation.framework", "UIKit.framework", "AppTrackingTransparency.framework", "AdSupport.framework"]
+capabilities=[]
+files=[]
+
+[plist]

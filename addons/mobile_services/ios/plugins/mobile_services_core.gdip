@@ -1,0 +1,18 @@
+; Godot iOS plugin descriptor. Copy this file and the matching .xcframework into
+; res://ios/plugins/ of a game, then switch the plugin on in the iOS export
+; preset. Without both, the singleton simply does not exist and every call to it
+; answers SERVICE_UNAVAILABLE.
+[config]
+name="MobileServicesCore"
+binary="mobile_services_core.release.xcframework"
+initialization="ms_core_init"
+deinitialization="ms_core_deinit"
+
+[dependencies]
+linked=[]
+embedded=[]
+system=["Foundation.framework", "Security.framework", "SystemConfiguration.framework", "UIKit.framework"]
+capabilities=[]
+files=[]
+
+[plist]

@@ -1,0 +1,35 @@
+; The repository is a working Godot 4 project as well as the addon's source.
+;
+; It exists so the demo scene runs straight from a clone, and so the headless
+; tests have a project to import. A GAME does not copy this file — it copies
+; addons/mobile_services/ into its own project. See README.md.
+
+config_version=5
+
+[application]
+
+config/name="Mobile Services Demo"
+config/description="Demo and test project for the Mobile Services Godot addon."
+run/main_scene="res://demo/scenes/main.tscn"
+config/features=PackedStringArray("4.4")
+config/icon="res://icon.svg"
+
+[autoload]
+
+MobileServices="*res://addons/mobile_services/runtime/mobile_services.gd"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+window/handheld/orientation=1
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/mobile_services/plugin.cfg")
+
+[mobile_services]
+
+config/path="res://mobile_services.cfg"
+config/environment=""

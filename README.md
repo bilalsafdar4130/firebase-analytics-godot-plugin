@@ -1,161 +1,164 @@
-# Firebase Analytics for Godot 4 (Android)
+# Mobile Services for Godot 4
 
-A self-contained Godot addon that gives GDScript a Firebase Analytics call, and
-puts the SDK into your Android build. Kotlin source included; **no downloaded
-plugin binary anywhere in the chain.**
+One addon that gives a Godot mobile game analytics, ads, purchases, a player
+identity and a consent flow — on **Android and iOS**, from **one GDScript API**,
+with the **native sources in this repository** and no downloaded plugin binaries
+anywhere in the chain.
 
-Copyright © 2026 Bilal Safdar. See `LICENSE`.
-
-> **Portable by design.** This folder is the whole addon: GDScript, Kotlin,
-> Gradle project and build script. Copy `firebase_analytics/` into any Godot 4
-> project's `addons/` and it behaves identically — it reads the package name and
-> build directory from that project's export preset and hardcodes nothing about
-> the game around it. It is kept in one folder precisely so it can be lifted out
-> into its own repository and shared between projects.
-
-## Why this exists
-
-Every published Firebase plugin for Godot is a third-party binary going into a
-signed release build, from a repository that can be archived, retagged or
-deleted underneath you — the best-known one already has been. The bridge itself
-is about 150 lines of Kotlin. Owning it costs one CI step and removes the
-dependency completely.
-
-It also avoids the fragile part every other integration shares. Firebase
-initialises itself from Android **string resources** (`google_app_id`,
-`google_api_key`, …), which Google's `com.google.gms.google-services` Gradle
-plugin normally generates from `google-services.json`. That Gradle plugin cannot
-be added through any Godot export API, so the usual approach is to string-edit
-the engine's generated `build.gradle`, anchored on lines that move between
-engine versions. **This addon generates those resources itself**, into the build
-template's own `res/` directory, and edits no Gradle file at all.
-
-## What it does at export time
-
-When the target is Android, the Gradle build is on, **and**
-`android/build/google-services.json` exists:
-
-1. adds `firebase-analytics` (via the Firebase BOM) to the app's dependencies,
-   through Godot's own `_get_android_dependencies` API;
-2. adds this addon's `bin/release/firebase-analytics-bridge-release.aar`;
-3. writes `android/build/res/values/firebase_analytics_bridge.xml` with the
-   Firebase configuration read out of `google-services.json` — picking the
-   client block that matches **your** package name, and refusing loudly if there
-   isn't one.
-
-Without `google-services.json` it stands down entirely: no SDK, no AAR, no
-resources. A project can carry the addon permanently and still ship ordinary
-builds — which is what makes "Firebase on/off" a single secret in CI rather
-than a branch.
-
-## Using it in a project
-
-1. Copy this folder to `res://addons/firebase_analytics/`.
-2. Enable **Firebase Analytics** in Project ▸ Project Settings ▸ Plugins.
-3. Install the Android build template (Project ▸ Install Android Build
-   Template) — Firebase needs the Gradle build.
-4. Put `google-services.json` from the Firebase console into `android/build/`.
-5. Build the bridge AAR:
-   ```
-   addons/firebase_analytics/tools/build_plugin.sh release
-   ```
-   Needs an Android SDK (`ANDROID_HOME`/`ANDROID_SDK_ROOT`), a JDK 17+, and
-   network access on the first run. It uses the Gradle wrapper that ships in the
-   Godot build template, so Gradle itself does not have to be installed, and it
-   compiles against the **engine's own** `godot-lib` from that template — there
-   is no `org.godotengine:godot` Maven version to pin or get wrong.
-6. Export as usual.
-
-### Calling it
-
-The plugin registers the singleton `FirebaseAnalyticsBridge`:
+Copyright © 2026 Bilal Safdar. MIT — see `LICENSE`.
 
 ```gdscript
-if Engine.has_singleton("FirebaseAnalyticsBridge"):
-    var firebase := Engine.get_singleton("FirebaseAnalyticsBridge")
-    firebase.logEvent("level_end", {"level_name": "grid_012", "success": 1})
-    firebase.setUserProperty("play_style", "methodical")
-    if not firebase.isReady():
-        print(firebase.lastError())
+func _ready() -> void:
+    MobileServices.initialized.connect(_on_ready)
+    MobileServices.ads.reward_earned.connect(_on_reward)
+    MobileServices.initialize()
+
+func _on_ready(_report: Dictionary) -> void:
+    MobileServices.analytics.log_event("game_started")
+    print(MobileServices.player.get_id())
+
+func watch_ad_for_a_life() -> void:
+    MobileServices.ads.show("rewarded_extra_life")
+
+func _on_reward(_placement: String, _type: String, amount: int) -> void:
+    give_extra_lives(amount)
 ```
 
-| Method | Purpose |
+That is the whole integration. No ad unit ids in your game's source, no
+platform branches, no `Engine.has_singleton` guards, and nothing that crashes
+when you press play on your PC.
+
+---
+
+## What it does
+
+| | |
 |---|---|
-| `logEvent(event: String, params: Dictionary)` | Log an event. Ints/floats/bools/strings are converted to what Firebase accepts; strings are truncated at 100 chars. |
-| `setUserProperty(name: String, value: String)` | Set a user property. |
-| `isReady() -> bool` | Whether the SDK actually started. **A plugin that is present and one that is working look identical without this.** |
-| `lastError() -> String` | The last failure in words, `""` when there has been none. |
+| **Analytics** | Firebase Analytics, with Firebase's silent naming rules checked before the SDK drops your event. Events sent before the SDK is ready are queued, not lost. |
+| **Crash reporting** | Firebase Crashlytics, plus breadcrumbs and non-fatals from GDScript. |
+| **Remote Config** | Change numbers after you have shipped. Reads never block. |
+| **Ads** | AdMob or AppLovin MAX behind **one placement-based API**. Banner, interstitial, rewarded, rewarded interstitial, app-open. Retry with backoff, per-impression revenue, and a reward that fires **once**, only when the network says the player earned it. |
+| **Purchases** | Google Play Billing and StoreKit. Consumables, non-consumables, subscriptions with offers, pending purchases, restore. Reduced to `has_entitlement("remove_ads")`. |
+| **Player identity** | One stable id from first launch, whether or not the player signs in. Play Games on Android, Game Center on iOS. |
+| **Achievements, leaderboards, cloud saves** | Play Games Services and Game Center, same API. |
+| **Consent** | Google UMP for the EEA/UK form, Apple's ATT prompt, and Consent Mode passed through to Firebase. |
+| **Diagnostics** | One dictionary that answers almost every "it does not work on my phone", with no ids, keys or tokens in it. |
 
-Guard every call behind `Engine.has_singleton`, or wrap it once — a build
-without the plugin (the editor, CI, iOS, desktop) must keep working. SparkLogic
-does this in `scripts/autoload/analytics.gd`, which is a reasonable thing to
-copy: it queues events until the plugin appears, retries detection, and reports
-the whole pipeline's state on a diagnostics screen.
+Every one of those is **optional**, per game, in one config file. A game that
+wants analytics and nothing else ships no ad SDK, no billing library and no Play
+Games client.
 
-### Event and parameter rules Firebase imposes
+## Why it exists
 
-Event names: ≤ 40 characters, letters/digits/underscores, not starting with a
-digit, and not one of Google's reserved prefixes (`firebase_`, `google_`,
-`ga_`). Parameter names: ≤ 40 characters. String values: 100 characters, which
-this plugin truncates for you. A number's type is registered from the first
-event that carries it, so a parameter must not arrive as an int on one build and
-a float on the next — the bridge widens ints to long and floats to double for
-exactly that reason.
+Every published Firebase or AdMob plugin for Godot is a third-party binary going
+into a signed release build, from a repository that can be archived, retagged or
+deleted underneath you — the best-known one already has been. The bridges here
+are a few hundred lines of Kotlin and Objective-C++. Owning them costs one CI
+step and removes the dependency completely.
 
-## Layout
+It also avoids the fragile part every other Firebase integration shares.
+Firebase initialises from Android **string resources**, which Google's
+`com.google.gms.google-services` Gradle plugin normally generates — and that
+Gradle plugin cannot be added through any Godot export API. The usual workaround
+is to string-edit the engine's generated `build.gradle`, anchored on lines that
+move between engine versions. **This addon generates those resources itself** and
+edits no Gradle file at all. See `docs/architecture.md`.
 
-```
-firebase_analytics/
-├── plugin.cfg              Godot addon manifest
-├── export_plugin.gd        Editor-only: injects AAR + SDK, generates config resources
-├── tools/build_plugin.sh   Builds the AAR (used by CI and by hand)
-├── android/                The bridge itself
-│   ├── build.gradle.kts    AGP/Kotlin/SDK versions matched to Godot 4.7's template
-│   ├── settings.gradle.kts
-│   ├── .gdignore           Keeps the Godot editor out of the build sources
-│   └── src/main/…/FirebaseAnalyticsBridge.kt
-└── bin/                    Built AARs (generated; not committed)
-```
+## The idea: one addon, many games
 
-`export_plugin.gd` has no `class_name` on purpose: that would register an
-editor-only script in the project's global class list, and an exported game then
-tries to load it against a release template that has no `EditorPlugin` in it.
-Exclude `addons/*` from the export preset's PCK filter too — nothing in here
-belongs inside the game package.
+There is not one ad unit id, product id or API key anywhere in
+`addons/mobile_services/`. They all live in **`res://mobile_services.cfg`**,
+which each game writes for itself:
 
-## Keeping it working
+```ini
+[ads]
+enabled = true
+provider = "admob"          # ← switch to "applovin_max" and nothing else changes
+android_app_id = "ca-app-pub-…~…"
 
-- **The singleton name is stated in three places and they must agree**:
-  `FirebaseAnalyticsBridge.PLUGIN_NAME` (Kotlin), `godotPluginName`
-  (`android/build.gradle.kts`, which stamps it into the manifest metadata Godot
-  scans), and whatever your game looks for. Change one, change all three.
-- **The Firebase version is stated in two places and they must agree**:
-  `firebaseBom` in `android/build.gradle.kts` (what the bridge compiles
-  against) and `FIREBASE_DEPENDENCIES` in `export_plugin.gd` (what the app
-  ships). Bump them together.
-- **On a Godot upgrade**, rebuild the AAR after installing the new Android build
-  template. The build script re-extracts the engine library from it, so the
-  bridge follows the engine automatically.
-- **If `google-services.json` is removed** from a build directory you have
-  already exported once, delete the generated
-  `android/build/res/values/firebase_analytics_bridge.xml` as well (or
-  reinstall the build template, which regenerates the directory). The addon
-  stands down when the config is gone but does not reach into a build it is no
-  longer part of.
+[ads.placement.rewarded_extra_life]
+format = "rewarded"
+admob_android = "ca-app-pub-…/…"
+admob_ios     = "ca-app-pub-…/…"
 
-## Testing
-
-`export_plugin.gd`'s config parsing is pure and covered by a headless test in
-the host project (`tools/verify_firebase_config.gd` in SparkLogic): the happy
-path, multi-app configs, five rejection cases, and the generated XML's
-well-formedness. The AAR build itself is verified by actually building it in CI.
-
-Verify events end to end on a device with:
-
-```
-adb shell setprop debug.firebase.analytics.app <your.package.name>
+[iap.product.remove_ads]
+type = "non_consumable"
+entitlement = "remove_ads"
 ```
 
-then watch Firebase console ▸ Analytics ▸ **DebugView**, which shows events
-within seconds. The standard reports take hours, and an empty report is not
-evidence of anything for most of a day.
+Adding this SDK to a fourth game is copying a folder and writing that file.
+
+## Requirements
+
+| | |
+|---|---|
+| Godot | 4.3 – 4.5 (developed against 4.4) |
+| Android | minSdk 24, targetSdk 34+, `arm64-v8a` and `armeabi-v7a` |
+| iOS | 14.0+, arm64 |
+| To build the Android plugins | JDK 17, an Android SDK, the Godot Android build template |
+| To build the iOS plugins | macOS, Xcode, SCons, a Godot source checkout |
+
+Exact dependency versions are in `docs/versions.md`.
+
+## Install
+
+1. Copy `addons/mobile_services/` into your project's `addons/`.
+2. Copy `addons/mobile_services/mobile_services.cfg.template` to
+   `res://mobile_services.cfg` and edit it.
+3. Enable **Mobile Services** in *Project ▸ Project Settings ▸ Plugins*. This
+   registers the `MobileServices` autoload for you.
+4. Build the native plugins:
+   ```
+   addons/mobile_services/tools/build_android.sh release
+   ```
+   (iOS needs a Mac: `tools/build_ios.sh` — see `docs/ios.md`.)
+5. Export.
+
+`docs/installation.md` has the full version, including Firebase, AdMob,
+AppLovin, Play Billing and Play Games setup. `docs/quick_start.md` is the
+five-minute one.
+
+## Documentation
+
+| | |
+|---|---|
+| [Quick start](docs/quick_start.md) | Five minutes to your first event and your first ad. |
+| [Installation](docs/installation.md) | The full setup, per service. |
+| [Configuration](docs/configuration.md) | Every key in `mobile_services.cfg`, and environments. |
+| [API reference](docs/api.md) | Every method and signal. |
+| [Architecture](docs/architecture.md) | How it fits together, and why. |
+| [Ads](docs/ads.md) | Placements, rewarded ads, mediation, test ads. |
+| [Purchases](docs/iap.md) | Products, entitlements, subscriptions, server validation. |
+| [Player identity](docs/player_identity.md) | Ids, sign-in, and what is deliberately not collected. |
+| [Play Games & Game Center](docs/play_games.md) | Where the two platforms differ. |
+| [Privacy & consent](docs/privacy.md) | UMP, ATT, Consent Mode, Data Safety. |
+| [Security](docs/security.md) | What ships in an app and what must never. |
+| [iOS](docs/ios.md) | Building the iOS plugins, and their current status. |
+| [Testing](docs/testing.md) | The manual matrix, and the headless tests. |
+| [Troubleshooting](docs/troubleshooting.md) | Every failure with a known cause. |
+| [Release](docs/release.md) | Cutting a version. |
+| [Migration](MIGRATION.md) | Upgrading a game from the 1.x Firebase-only addon. |
+| [Changelog](CHANGELOG.md) | What changed. |
+| [Contributing](CONTRIBUTING.md) | Adding a service or an ad network. |
+
+## Running the demo
+
+This repository **is** a Godot project. Open it, press play, and you get a
+screen with a button for every service. On a PC every one of them answers
+"unavailable on Linux" and the game keeps running — which is the behaviour the
+whole SDK is built around.
+
+## Status
+
+| | |
+|---|---|
+| GDScript SDK | Complete. Covered by headless tests in CI. |
+| Android native | Complete. Built from source by CI on every push. |
+| iOS native | **Preview.** Complete sources, not yet built in CI — building them needs macOS and Xcode, which this repository's CI does not have. Build and verify on a Mac before shipping. See [`docs/ios.md`](docs/ios.md). |
+
+## Support
+
+Open an issue. Paste `MobileServices.get_diagnostics_text()` into it — it names
+your SDK version, engine version, device, which native plugins are present,
+which services started and what the last failure of each was, and it contains no
+ids, keys or tokens.

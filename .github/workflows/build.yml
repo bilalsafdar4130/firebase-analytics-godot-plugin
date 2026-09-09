@@ -1,0 +1,122 @@
+name: build
+
+# WHAT CI CAN AND CANNOT PROVE HERE.
+#
+# It runs the headless GDScript tests and it builds all six Android AARs from
+# source. It does NOT build the iOS plugins: those are static libraries compiled
+# against the engine's own C++ headers with Xcode, which needs macOS. That gap is
+# documented in docs/ios.md rather than papered over — the iOS native half is
+# marked preview for exactly this reason.
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Must match the version games export with; the plugins compile against the
+  # engine library from THIS version's Android build template.
+  GODOT_VERSION: "4.4.1"
+  GODOT_RELEASE: "stable"
+
+jobs:
+  tests:
+    name: headless tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download"
+          TAG="${GODOT_VERSION}-${GODOT_RELEASE}"
+          curl -fsSL -o godot.zip \
+            "$BASE/$TAG/Godot_v${TAG}_linux.x86_64.zip"
+          unzip -q godot.zip
+          mv "Godot_v${TAG}_linux.x86_64" /usr/local/bin/godot
+          chmod +x /usr/local/bin/godot
+          godot --version
+
+      - name: Import the project
+        # The first import always reports errors for resources that do not exist
+        # yet, and exits non-zero on some versions. The run that matters is the
+        # second one, and the test run after it.
+        run: |
+          godot --headless --import || true
+          godot --headless --import
+
+      - name: Run the tests
+        run: godot --headless --script res://tests/run_tests.gd
+
+  android:
+    name: android plugins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Godot and its export templates
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download"
+          TAG="${GODOT_VERSION}-${GODOT_RELEASE}"
+          curl -fsSL -o godot.zip "$BASE/$TAG/Godot_v${TAG}_linux.x86_64.zip"
+          unzip -q godot.zip
+          mv "Godot_v${TAG}_linux.x86_64" /usr/local/bin/godot
+          chmod +x /usr/local/bin/godot
+          curl -fsSL -o templates.tpz \
+            "$BASE/$TAG/Godot_v${TAG}_export_templates.tpz"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}"
+          unzip -q templates.tpz -d /tmp/templates
+          mv /tmp/templates/templates/* \
+            "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}/"
+
+      - name: Install the Android build template
+        # The plugins compile against the ENGINE'S OWN library, extracted from
+        # this template by tools/build_android.sh. That is why there is no
+        # `org.godotengine:godot` Maven version pinned anywhere.
+        run: |
+          set -euo pipefail
+          godot --headless --import || true
+          godot --headless --install-android-build-template
+          test -f android/build/gradlew
+
+      - name: Build every module
+        run: |
+          chmod +x addons/mobile_services/tools/build_android.sh
+          addons/mobile_services/tools/build_android.sh both
+
+      - name: Check every module produced an AAR
+        run: |
+          set -euo pipefail
+          for variant in debug release; do
+            for module in core firebase ads billing playgames consent; do
+              aar="addons/mobile_services/bin/android/$variant/mobile-services-$module-$variant.aar"
+              test -f "$aar" || { echo "missing $aar"; exit 1; }
+              echo "ok $aar ($(stat -c%s "$aar") bytes)"
+            done
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-aars
+          path: addons/mobile_services/bin/android/
+          if-no-files-found: error
+
+      - name: Attach the AARs to the release
+        # A game should depend on a released tag rather than on main; this is
+        # what makes that possible without committing binaries to the repository.
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: addons/mobile_services/bin/android/release/*.aar
+          fail_on_unmatched_files: true
