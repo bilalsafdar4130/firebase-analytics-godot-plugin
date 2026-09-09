@@ -1,0 +1,160 @@
+name: android
+
+# The expensive half, and everything here is about not paying for it twice.
+#
+# WHERE THE TIME ACTUALLY GOES, measured on a cold run of 2m19s:
+#
+#     setup-android            16s
+#     SDK platform install      3s
+#     fetch the template        7s
+#     unpack it                 1s
+#     GRADLE BUILD           1m38s   <- the job, essentially
+#     save the caches           8s
+#
+# So the levers, in the order they matter:
+#
+#  1. A PATH FILTER, worth the whole 2m19s on every commit that does not touch
+#     android/. Nothing outside it and the build script can change what this job
+#     produces, so nothing else starts it. Narrow on purpose — the opposite of
+#     the gdscript workflow's, which costs seconds and so is deliberately wide.
+#  2. GRADLE'S CACHE, keyed on the build files, so a run that changes no
+#     dependency re-resolves nothing. Compiling six modules twice over is
+#     irreducible; resolving AGP, Kotlin and six SDKs again is not.
+#  3. The template cache, worth about seven seconds. Kept because it is free and
+#     because the archive is immutable per release — but it is not the saving it
+#     was assumed to be before anyone timed it.
+#
+# It also no longer installs Godot. It used to, to run
+# `--install-android-build-template`; that hung, and the unzip that replaced it
+# needs no engine binary.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "addons/mobile_services/android/**"
+      - "addons/mobile_services/tools/build_android.sh"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "addons/mobile_services/android/**"
+      - "addons/mobile_services/tools/build_android.sh"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+  # Called by release.yml on a tag, so a release runs THIS build rather than a
+  # copy of it that could drift from it.
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The engine version whose build template the plugins compile against. The
+  # toolchain in android/build.gradle.kts is copied from THIS version's
+  # config.gradle — see docs/versions.md before changing either.
+  GODOT_VERSION: "4.4.1"
+  GODOT_RELEASE: "stable"
+
+jobs:
+  android:
+    name: plugins
+    runs-on: ubuntu-latest
+    # A cold run measures 2m19s end to end. Twenty minutes is a hang, not a slow
+    # build — and before this ceiling existed a hung step ran until the runner's
+    # own limit.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          # Keyed on the build files, so a run that changes no dependency
+          # re-resolves nothing. This is most of the saving on a warm run.
+          cache: gradle
+          cache-dependency-path: |
+            addons/mobile_services/android/**/*.gradle.kts
+            addons/mobile_services/android/gradle.properties
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the SDK platform the modules compile against
+        # `compileSdk` in android/build.gradle.kts, which follows the engine's.
+        # AGP can download it itself, but only sometimes and never predictably —
+        # an explicit install turns "the build failed on a fresh runner" into a
+        # step with a name.
+        run: |
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          sdkmanager --list_installed | grep -E 'platforms;android-34|build-tools;34'
+
+      - name: Restore the Godot Android build template
+        id: template
+        uses: actions/cache@v4
+        with:
+          path: .godot-template/android_source.zip
+          # Keyed on the engine version alone: the archive is immutable for a
+          # given release, so this is a hit on every run until Godot is upgraded.
+          key: godot-android-source-${{ env.GODOT_VERSION }}-${{ env.GODOT_RELEASE }}
+
+      - name: Fetch the build template
+        if: steps.template.outputs.cache-hit != 'true'
+        # The whole export-templates archive comes down to get one file out of
+        # it. Measured at about seven seconds on a runner — less than expected,
+        # and the reason the note above ranks this cache last.
+        run: |
+          set -euo pipefail
+          TAG="${GODOT_VERSION}-${GODOT_RELEASE}"
+          curl -fsSL -o templates.tpz \
+            "https://github.com/godotengine/godot/releases/download/$TAG/Godot_v${TAG}_export_templates.tpz"
+          mkdir -p .godot-template
+          unzip -j -o templates.tpz 'templates/android_source.zip' -d .godot-template
+          rm -f templates.tpz
+          ls -la .godot-template
+
+      - name: Unpack it
+        # "Install Android Build Template" is this and nothing more: unzip the
+        # Gradle project into res://android/build, and drop the .gdignore files
+        # that stop the engine importing a Gradle project as game assets.
+        #
+        # It is NOT done with `godot --headless --install-android-build-template`,
+        # which starts the editor and hung indefinitely on this runner.
+        run: |
+          set -euo pipefail
+          mkdir -p android/build
+          unzip -q -o .godot-template/android_source.zip -d android/build
+          : > android/.gdignore
+          : > android/build/.gdignore
+          test -f android/build/gradlew || {
+            echo "::error::no gradlew in the unpacked build template"
+            find android/build -maxdepth 2 | head -50
+            exit 1
+          }
+          echo "engine libraries in the template:"
+          find android/build -name '*.aar' | sed 's/^/  /'
+
+      - name: Build every module
+        run: |
+          chmod +x addons/mobile_services/tools/build_android.sh
+          addons/mobile_services/tools/build_android.sh both
+
+      - name: Check every module produced an AAR
+        # The build script warns and carries on for a module that produced
+        # nothing; this is what turns that into a failure. Twelve files: six
+        # modules, two variants.
+        run: |
+          set -euo pipefail
+          for variant in debug release; do
+            for module in core firebase ads billing playgames consent; do
+              aar="addons/mobile_services/bin/android/$variant/mobile-services-$module-$variant.aar"
+              test -f "$aar" || { echo "::error::missing $aar"; exit 1; }
+              echo "ok $aar ($(stat -c%s "$aar") bytes)"
+            done
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-aars
+          path: addons/mobile_services/bin/android/
+          if-no-files-found: error
