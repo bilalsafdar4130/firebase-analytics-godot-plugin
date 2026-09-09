@@ -1,0 +1,104 @@
+name: gdscript
+
+# The cheap half: ~20 seconds, and it is what proves the SDK compiles at all.
+#
+# Kept in its own workflow from the Android build so a change to a doc, a config
+# key or a GDScript file does not spend three minutes on Gradle — and so a
+# Kotlin change does not have to wait on this to report.
+#
+# Its path filter is deliberately WIDE where the Android one is narrow. This job
+# costs seconds, so the cost of running it unnecessarily is nothing, and the cost
+# of skipping it when it mattered is a broken SDK that reports green.
+
+# The path list is written out twice on purpose: GitHub Actions does not support
+# YAML anchors, and a workflow using one fails to parse rather than falling back.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.gd"
+      - "**.cfg"
+      - "project.godot"
+      - "addons/mobile_services/**"
+      - "tests/**"
+      - "demo/**"
+      - "examples/**"
+      - ".github/workflows/gdscript.yml"
+  pull_request:
+    paths:
+      - "**.gd"
+      - "**.cfg"
+      - "project.godot"
+      - "addons/mobile_services/**"
+      - "tests/**"
+      - "demo/**"
+      - "examples/**"
+      - ".github/workflows/gdscript.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.4.1"
+  GODOT_RELEASE: "stable"
+
+jobs:
+  gdscript:
+    name: scripts and tests
+    runs-on: ubuntu-latest
+    # Godot downloads in seconds and the tests run in one. Anything past this is
+    # a hang, and a hang that is allowed to run is billed like work.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot
+        # Only the editor binary, ~60 MB, a couple of seconds. NOT the export
+        # templates: nothing here exports anything.
+        run: |
+          set -euo pipefail
+          TAG="${GODOT_VERSION}-${GODOT_RELEASE}"
+          curl -fsSL -o godot.zip \
+            "https://github.com/godotengine/godot/releases/download/$TAG/Godot_v${TAG}_linux.x86_64.zip"
+          unzip -q godot.zip
+          sudo mv "Godot_v${TAG}_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          godot --version
+
+      - name: Import the project
+        # The first import reports errors for resources that do not exist yet and
+        # exits non-zero on some versions. The run that matters is the second.
+        run: |
+          timeout 300 godot --headless --import || true
+          timeout 300 godot --headless --import
+
+      - name: Check every script compiles
+        # `run_tests.gd` only compiles what it reaches. Everything under
+        # examples/ and demo/ is what a developer copies into their own game, so
+        # a parse error there is one handed straight to somebody else.
+        run: |
+          set -o pipefail
+          timeout 300 godot --headless --script res://tests/check_scripts.gd 2>&1 | tee compile-output.log
+          if grep -qE '^(SCRIPT )?ERROR:' compile-output.log; then
+            echo "::error::At least one script failed to compile."
+            exit 1
+          fi
+
+      - name: Run the tests
+        # GODOT LOGS A PARSE ERROR AND CARRIES ON, so `run_tests.gd` can exit 0
+        # while half the SDK failed to compile — which is exactly what happened
+        # the first time this ran. A green job that hides a broken build is worse
+        # than a red one, so the output is checked as well as the exit code.
+        #
+        # The autoload starts during this run, so a script error anywhere in the
+        # SDK surfaces here even though the tests only exercise the pure half.
+        run: |
+          set -o pipefail
+          timeout 300 godot --headless --script res://tests/run_tests.gd 2>&1 | tee test-output.log
+          if grep -qE '^(SCRIPT )?ERROR:' test-output.log; then
+            echo "::error::Godot logged script errors — the SDK does not compile cleanly."
+            grep -nE '^(SCRIPT )?ERROR:' -A 1 test-output.log
+            exit 1
+          fi

@@ -1,0 +1,46 @@
+name: release
+
+# A tag builds the AARs and attaches them to the GitHub release, so a game can
+# depend on a RELEASED VERSION rather than on whatever main happens to be. That
+# is the whole reason this exists: three games share one addon and need to move
+# one at a time.
+#
+# It calls the android workflow rather than repeating its steps. A release that
+# is built differently from what CI checks is a release nobody has tested, and a
+# copied set of build steps drifts from the original the first time one is
+# touched.
+#
+# No path filter here, unlike the workflows it calls: a tag always builds,
+# whatever the commit before it happened to change.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/android.yml
+
+  attach:
+    name: attach the AARs
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # The only job in this repository that writes anything back to GitHub.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-aars
+          path: aars
+
+      - name: Attach them to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Release AARs only. The debug ones are built and checked, but a game
+          # shipping to a store has no use for them, and offering both invites
+          # somebody to ship the wrong one.
+          files: aars/release/*.aar
+          fail_on_unmatched_files: true
