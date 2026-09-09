@@ -5,7 +5,7 @@ Three workflows, split by what they cost.
 | Workflow | Runs when | Proves | Roughly |
 |---|---|---|---|
 | `gdscript.yml` | any `.gd`, `.cfg`, `project.godot`, or anything under `addons/`, `tests/`, `demo/`, `examples/` | Every script in the project compiles — `examples/` and `demo/` included — and the pure half of the SDK behaves: config parsing and validation, the `google-services.json` reader, Firebase's naming rules, the error vocabulary, and that the five places stating the SDK version agree. | 20 s |
-| `android.yml` | only `addons/mobile_services/android/**` or its build script | All six modules compile from source against the engine's own library, both variants. Twelve AARs, each checked to exist. | ~3 min cold, well under 1 min warm |
+| `android.yml` | only `addons/mobile_services/android/**` or its build script | All six modules compile from source against the engine's own library, both variants. Twelve AARs, each checked to exist. | 2 m 19 s cold |
 | `release.yml` | a `v*` tag | Calls `android.yml` and attaches the release AARs to the GitHub release. | |
 
 ## Why they are split
@@ -22,18 +22,34 @@ The two path filters are deliberately asymmetric:
   costs nothing, while skipping it when it mattered means a broken SDK reporting
   green — which has already happened once here.
 
-## What is cached, and why it needed to be
+## Where the time actually goes
 
-The Android job used to spend most of its time on work with no result:
+Measured on a cold Android run totalling **2 m 19 s**:
 
-- A **~1 GB export-templates archive**, downloaded every run to extract one file
-  from it. Now fetched once per Godot version and kept — the archive is immutable
-  for a given release, so it is a cache hit until the engine is upgraded.
-- **A Godot editor binary this job never ran.** It was there for
-  `--install-android-build-template`, which hung; the unzip that replaced it
-  needs no engine binary, so it is gone.
-- **A cold Gradle** resolving AGP, Kotlin and six SDKs from scratch, keyed now on
-  the build files so a run that changes no dependency re-resolves nothing.
+| | |
+|---|---|
+| setup-android | 16 s |
+| SDK platform install | 3 s |
+| fetch the build template | 7 s |
+| unpack it | 1 s |
+| **Gradle build** | **1 m 38 s** |
+| save the caches | 8 s |
+
+So **the path filter is the real saving** — it is worth the entire 2 m 19 s on
+every commit that does not touch `android/`, which is most of them.
+
+Second is **Gradle's cache**, keyed on the build files: compiling six modules
+twice over is irreducible work, but re-resolving AGP, Kotlin and six SDKs is not.
+
+The **template cache** is worth about seven seconds. It is kept because it costs
+nothing and the archive is immutable per release — but it is not the saving it
+was assumed to be before anyone timed it. The estimate in the first version of
+this file said "roughly a minute"; the measurement said otherwise, and the
+comments now carry the measured figures rather than the guess.
+
+The job also no longer installs Godot at all. It used to, to run
+`--install-android-build-template`, which hung; the plain unzip that replaced it
+needs no engine binary.
 
 ## What is not covered
 

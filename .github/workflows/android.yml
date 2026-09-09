@@ -2,22 +2,27 @@ name: android
 
 # The expensive half, and everything here is about not paying for it twice.
 #
-# WHAT IT USED TO COST, per run: a ~1 GB export-templates download for one file
-# inside it, a Godot editor binary that this job never runs, and a cold Gradle
-# resolving AGP, Kotlin and six SDKs from scratch. About two and three-quarter
-# minutes, on every commit, including commits that only touched a doc.
+# WHERE THE TIME ACTUALLY GOES, measured on a cold run of 2m19s:
 #
-# THREE THINGS FIXED THAT, in descending order of size:
+#     setup-android            16s
+#     SDK platform install      3s
+#     fetch the template        7s
+#     unpack it                 1s
+#     GRADLE BUILD           1m38s   <- the job, essentially
+#     save the caches           8s
 #
-#  1. A PATH FILTER. Nothing outside android/ and its build script can change
-#     what this job produces, so nothing else starts it. It is narrow on purpose
-#     — the opposite of the gdscript workflow's, which costs seconds and so is
-#     deliberately wide.
-#  2. THE TEMPLATE IS CACHED. The 1 GB archive is downloaded once per Godot
-#     version, and the one file this job needs out of it — android_source.zip,
-#     which carries the Gradle project and the engine's own AARs — is kept.
-#  3. GRADLE'S CACHE IS KEPT, keyed on the build files. A run that changes no
-#     dependency re-resolves nothing.
+# So the levers, in the order they matter:
+#
+#  1. A PATH FILTER, worth the whole 2m19s on every commit that does not touch
+#     android/. Nothing outside it and the build script can change what this job
+#     produces, so nothing else starts it. Narrow on purpose — the opposite of
+#     the gdscript workflow's, which costs seconds and so is deliberately wide.
+#  2. GRADLE'S CACHE, keyed on the build files, so a run that changes no
+#     dependency re-resolves nothing. Compiling six modules twice over is
+#     irreducible; resolving AGP, Kotlin and six SDKs again is not.
+#  3. The template cache, worth about seven seconds. Kept because it is free and
+#     because the archive is immutable per release — but it is not the saving it
+#     was assumed to be before anyone timed it.
 #
 # It also no longer installs Godot. It used to, to run
 # `--install-android-build-template`; that hung, and the unzip that replaced it
@@ -55,9 +60,9 @@ jobs:
   android:
     name: plugins
     runs-on: ubuntu-latest
-    # Gradle from cold runs to about three minutes; warm, well under one. Twice
-    # the cold figure is a hang, not a slow build — and before this ceiling
-    # existed a hung step ran until the runner's own limit.
+    # A cold run measures 2m19s end to end. Twenty minutes is a hang, not a slow
+    # build — and before this ceiling existed a hung step ran until the runner's
+    # own limit.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -95,9 +100,9 @@ jobs:
 
       - name: Fetch the build template
         if: steps.template.outputs.cache-hit != 'true'
-        # The whole export-templates archive has to come down to get one file out
-        # of it, which is why the result is cached rather than the download
-        # repeated. Roughly a minute, once per engine version.
+        # The whole export-templates archive comes down to get one file out of
+        # it. Measured at about seven seconds on a runner — less than expected,
+        # and the reason the note above ranks this cache last.
         run: |
           set -euo pipefail
           TAG="${GODOT_VERSION}-${GODOT_RELEASE}"
