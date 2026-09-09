@@ -112,6 +112,15 @@ func _on_products_loaded(products: Dictionary) -> void:
 		_say("%s — %s" % [name, products[name].get("price", "?")])
 
 
+## Fires ONCE per purchase, including one that arrives from a restore or that
+## completed on another device. Entitlements are granted by the SDK before this
+## runs; consumables are the game's to grant, here.
+func _on_purchase_completed(purchase: Dictionary) -> void:
+	_say("[color=green]purchased %s[/color]" % purchase.get("product", "?"))
+	if purchase.get("type", "") == "consumable":
+		_say("  (a real game would add the coins here, then save)")
+
+
 func _on_buy_remove_ads_pressed() -> void:
 	if MobileServices.iap.has_entitlement("remove_ads"):
 		_say("already owned")

@@ -19,16 +19,18 @@ func _initialize() -> void:
 	var failed: PackedStringArray = PackedStringArray()
 
 	for path in scripts:
-		# `load()` compiles the script and everything it depends on, and answers
-		# null when that fails — printing its own parse error above this line.
-		# The value added here is the summary and, crucially, the non-zero exit.
+		# `load()` compiles the script and everything it depends on, printing its
+		# own parse error above this line. It does NOT answer null for a broken
+		# GDScript — it hands back the resource with the script marked invalid,
+		# which is how the first version of this file reported "0 failed" while
+		# Godot had just logged a parse error two lines earlier.
 		#
-		# Deliberately NOT checking `can_instantiate()`: it is false for a @tool
-		# script outside the editor, and this addon has four of those. A null
-		# result is the only signal that means "this did not compile" and
-		# nothing else.
+		# `can_instantiate()` is the flag that actually tracks validity. For
+		# GDScript it reads `valid && (tool || scripting_enabled)`, and scripting
+		# is enabled while a script is running — so here it means exactly
+		# "this compiled", @tool scripts included.
 		var script = load(path)
-		if script == null or not (script is GDScript):
+		if script == null or not (script is GDScript) or not script.can_instantiate():
 			failed.append(path)
 
 	print("")
