@@ -24,32 +24,55 @@ The two path filters are deliberately asymmetric:
 
 ## Where the time actually goes
 
-Measured on a cold Android run totalling **2 m 19 s**:
+Measured, both runs on the same commit range:
 
-| | |
-|---|---|
-| setup-android | 16 s |
-| SDK platform install | 3 s |
-| fetch the build template | 7 s |
-| unpack it | 1 s |
-| **Gradle build** | **1 m 38 s** |
-| save the caches | 8 s |
+| Android step | Cold | Warm |
+|---|---:|---:|
+| set up job + checkout | 1 s | 4 s |
+| `setup-java` (restores the Gradle cache) | 1 s | 7 s |
+| `setup-android` | 16 s | **20 s** |
+| SDK platform install | 3 s | 1 s |
+| restore the build template | 0 s | 2 s |
+| fetch the build template | 7 s | *skipped* |
+| unpack it | 1 s | 1 s |
+| **Gradle build** | **1 m 38 s** | **12 s** |
+| check, upload, save caches | 9 s | 2 s |
+| **total** | **2 m 19 s** | **52 s** |
 
-So **the path filter is the real saving** — it is worth the entire 2 m 19 s on
-every commit that does not touch `android/`, which is most of them.
-
-Second is **Gradle's cache**, keyed on the build files: compiling six modules
-twice over is irreducible work, but re-resolving AGP, Kotlin and six SDKs is not.
+**Gradle's dependency cache is the whole story.** Compiling six modules twice
+over is irreducible work; re-resolving AGP, Kotlin and six SDKs is not, and not
+doing it takes the build step from 98 seconds to 12.
 
 The **template cache** is worth about seven seconds. It is kept because it costs
 nothing and the archive is immutable per release — but it is not the saving it
-was assumed to be before anyone timed it. The estimate in the first version of
-this file said "roughly a minute"; the measurement said otherwise, and the
-comments now carry the measured figures rather than the guess.
+was assumed to be. The first version of this file estimated "roughly a minute";
+the measurement said otherwise, and the numbers here are measured.
+
+On a warm run **`setup-android` is now the largest single step**, at 20 of the 52
+seconds. The runner image already ships an Android SDK, so it is in principle
+removable — but it is what accepts the SDK licences AGP needs, and a build three
+shipped games depend on is a poor place to trade robustness for 20 seconds.
+Noted here so the next person looking for time knows where it is.
 
 The job also no longer installs Godot at all. It used to, to run
 `--install-android-build-template`, which hung; the plain unzip that replaced it
 needs no engine binary.
+
+## How much the path filter actually saves, precisely
+
+It depends on the event, and the difference is easy to get wrong:
+
+- **On `push` to `main`,** the filter is evaluated against **that push's diff**.
+  A commit touching only documentation does not start the Android job at all.
+- **On `pull_request`,** it is evaluated against the **whole PR diff**, not the
+  latest commit. So a PR that touched `addons/mobile_services/android/**` at any
+  point keeps running the Android job on every subsequent commit, including
+  documentation-only ones.
+
+That second rule is why this very PR ran both workflows on a commit that changed
+only `android.yml` and this file: the PR's cumulative diff also creates
+`gdscript.yml`, which the gdscript filter matches. Working as intended — just
+not the same rule as the push case.
 
 ## What is not covered
 
