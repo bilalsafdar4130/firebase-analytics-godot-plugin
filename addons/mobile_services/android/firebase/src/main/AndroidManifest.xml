@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Two singletons from one module.
+
+  The engine scans the merged manifest for <meta-data> entries whose name starts
+  with "org.godotengine.plugin.v2." — the suffix is the singleton name GDScript
+  reaches the plugin by, and the value is the class to instantiate. The second
+  entry is the 1.x compatibility singleton; see FirebaseAnalyticsCompatPlugin.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <meta-data
+            android:name="org.godotengine.plugin.v2.${godotPluginName}"
+            android:value="${godotPluginClass}" />
+        <meta-data
+            android:name="org.godotengine.plugin.v2.${legacyPluginName}"
+            android:value="${legacyPluginClass}" />
+    </application>
+</manifest>

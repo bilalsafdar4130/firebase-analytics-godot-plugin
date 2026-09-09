@@ -1,0 +1,16 @@
+; Google AdMob. The Google Mobile Ads SDK is added to the Xcode project through
+; CocoaPods or SPM — see docs/ios.md.
+[config]
+name="MobileServicesAds"
+binary="mobile_services_ads.release.xcframework"
+initialization="ms_ads_init"
+deinitialization="ms_ads_deinit"
+
+[dependencies]
+linked=[]
+embedded=[]
+system=["Foundation.framework", "UIKit.framework", "AdSupport.framework", "StoreKit.framework"]
+capabilities=[]
+files=[]
+
+[plist]

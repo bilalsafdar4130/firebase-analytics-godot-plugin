@@ -1,0 +1,33 @@
+# Godot
+.godot/
+*.translation
+
+# Built plugin binaries. They are release artifacts, not source: CI builds them
+# and attaches them to a GitHub release. Committing them would put an unreviewed
+# binary in the chain a signed game is built from, which is the whole thing this
+# addon exists to avoid.
+addons/mobile_services/bin/
+addons/mobile_services/android/libs/
+addons/mobile_services/android/*/build/
+addons/mobile_services/android/.gradle/
+addons/mobile_services/ios/build/
+addons/mobile_services/ios/plugins/*.xcframework/
+addons/mobile_services/.godot-source/
+
+# Per-game secrets and configuration. NONE of these belong in the addon's
+# repository — a game keeps its own.
+google-services.json
+GoogleService-Info.plist
+firebase_client.cfg
+
+# ...except this repository's own demo config, which is committed on purpose:
+# the repository is a working demo project, and the config is the demonstration.
+# It carries GOOGLE'S PUBLIC TEST AD UNITS and no real ids.
+!/mobile_services.cfg
+
+# Android build template, installed into a project rather than committed.
+/android/
+
+# Local editor state
+export_presets.cfg
+.DS_Store

@@ -1,0 +1,171 @@
+; Mobile Services — per-game configuration.
+;
+; Copy this file to res://mobile_services.cfg and edit it. NOTHING in
+; addons/mobile_services/ needs to change from one game to the next; this file
+; is the whole difference between them.
+;
+; WHAT IS SAFE TO COMMIT. Everything here. AdMob unit ids, an AppLovin SDK key,
+; a Firebase app id and store product ids are all public by design — they ship
+; inside every APK and IPA and identify your app rather than authorise anything.
+; What must NEVER be in a game project: a Google service-account private key, an
+; OAuth client SECRET, a Play Developer API key, or an AppLovin *management* key.
+; Those belong on a server. See docs/security.md.
+;
+; ENVIRONMENTS. A file called mobile_services.<environment>.cfg next to this one
+; is overlaid on top of it, key by key. Debug builds use "development" and
+; release builds "production" unless mobile_services/config/environment says
+; otherwise in Project Settings. A development overlay is usually four lines:
+;
+;   [core]
+;   log_level = "debug"
+;   test_mode = true
+
+[core]
+; none | error | warn | info | debug
+log_level = "warn"
+; Test ads, verbose native logging, and permission to call the deliberately
+; destructive test helpers. MUST be false in a release build: test ads earn
+; nothing, and serving real ads to a device flagged as a test device is what
+; gets an AdMob account suspended.
+test_mode = false
+; Call MobileServices.initialize() automatically on autoload. Turn it off if
+; your game wants to show its own privacy screen first.
+auto_initialize = true
+
+[analytics]
+enabled = true
+crashlytics_enabled = true
+remote_config_enabled = false
+remote_config_min_fetch_seconds = 3600
+; Send Firebase's ad_impression / rewarded_ad_completed events automatically.
+auto_ad_events = true
+; Send Firebase's purchase / purchase_failed events automatically.
+auto_iap_events = true
+; Use the player id from MobileServices.player as the Firebase user id.
+sync_user_id = true
+
+[ads]
+enabled = false
+; none | admob | applovin_max
+provider = "admob"
+; From the AdMob console. Goes in the Android manifest and the iOS Info.plist;
+; a build with ads enabled and no app id crashes AdMob's own initialiser.
+android_app_id = ""
+ios_app_id = ""
+; Required when provider = "applovin_max".
+applovin_sdk_key = ""
+; Devices that should always be served test ads. Find the id in logcat/Xcode on
+; the first ad request; it is printed by both SDKs.
+test_device_ids = []
+; top | bottom
+banner_position = "bottom"
+auto_reload = true
+reload_backoff_seconds = [5.0, 15.0, 45.0, 120.0, 300.0]
+mute_on_start = false
+; AdMob content rating: "" (any) | "G" | "PG" | "T" | "MA"
+max_ad_content_rating = ""
+; Set true only if your app targets children — it disables personalised ads and
+; is a legal declaration under COPPA.
+tag_for_child_directed_treatment = false
+tag_for_under_age_of_consent = false
+; When the player holds this entitlement the SDK stops serving ads. Leave empty
+; to handle it in game code with MobileServices.ads.set_suppressed().
+suppress_when_entitled = "remove_ads"
+; Extra Maven coordinates for mediation adapters the SDK does not ship itself —
+; AppLovin's per-network adapters, for instance. Which ones is a question for
+; your MAX dashboard, so the SDK does not guess.
+extra_android_dependencies = []
+; The same for iOS CocoaPods lines.
+extra_ios_pods = []
+
+; One section per placement. The name is what game code says:
+;   MobileServices.ads.show("interstitial_game_over")
+; format: banner | interstitial | rewarded | rewarded_interstitial | app_open
+; The unit ids below are GOOGLE'S OWN PUBLIC TEST UNITS — replace them with
+; yours before release, and check test_mode is false.
+
+[ads.placement.banner_main]
+format = "banner"
+admob_android = "ca-app-pub-3940256099942544/6300978111"
+admob_ios = "ca-app-pub-3940256099942544/2934735716"
+applovin_android = ""
+applovin_ios = ""
+
+[ads.placement.interstitial_game_over]
+format = "interstitial"
+admob_android = "ca-app-pub-3940256099942544/1033173712"
+admob_ios = "ca-app-pub-3940256099942544/4411468910"
+applovin_android = ""
+applovin_ios = ""
+
+[ads.placement.rewarded_extra_life]
+format = "rewarded"
+admob_android = "ca-app-pub-3940256099942544/5224354917"
+admob_ios = "ca-app-pub-3940256099942544/1712485313"
+applovin_android = ""
+applovin_ios = ""
+
+[iap]
+enabled = false
+; Finish purchases with the store automatically. Leave both on unless a server
+; verifies receipts first — an unacknowledged purchase is REFUNDED by Google
+; after three days, and an unconsumed consumable can never be bought again.
+auto_acknowledge = true
+auto_consume = true
+; Re-read what the account owns at start-up. This is what makes a reinstall or
+; a second device keep the player's purchases.
+restore_on_start = true
+
+; One section per product. The name is what game code says:
+;   MobileServices.iap.purchase("remove_ads")
+; type: consumable | non_consumable | subscription
+; entitlement: what owning it grants. Leave empty for consumables.
+
+[iap.product.remove_ads]
+type = "non_consumable"
+entitlement = "remove_ads"
+android_id = "remove_ads"
+ios_id = "remove_ads"
+
+[iap.product.coins_100]
+type = "consumable"
+entitlement = ""
+android_id = "coins_100"
+ios_id = "coins_100"
+
+[iap.product.premium_monthly]
+type = "subscription"
+entitlement = "premium"
+android_id = "premium_monthly"
+ios_id = "premium_monthly"
+
+[player]
+enabled = true
+play_games_enabled = false
+game_center_enabled = false
+; The WEB OAuth client id from the Google Cloud console — needed only if a
+; server of yours verifies who the player is. The client SECRET stays on the
+; server and must never appear in a game project.
+play_games_server_client_id = ""
+; The NUMERIC Play Games project id from the Play Console. Android needs it in
+; the manifest before Play Games will authenticate at all, and reports its
+; absence only in logcat.
+play_games_app_id = ""
+
+[consent]
+; Google's User Messaging Platform. Required to serve ads in the EEA, the UK and
+; Switzerland. Leaving this off makes the SDK grant full consent and log a
+; warning — see docs/privacy.md before you do that.
+enabled = false
+request_on_start = true
+; disabled | eea | not_eea — forces a geography while testing. Only works on a
+; device listed in test_device_hashed_ids.
+debug_geography = "disabled"
+under_age_of_consent = false
+test_device_hashed_ids = []
+; Ask for App Tracking Transparency on iOS. Apple allows the prompt once per
+; install, ever.
+att_prompt = true
+; The sentence Apple shows in the tracking prompt. Apple rejects builds whose
+; text does not say what the data is used for.
+att_message = "This lets us show ads that are more relevant to you."
