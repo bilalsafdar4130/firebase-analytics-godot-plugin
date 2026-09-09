@@ -1,6 +1,5 @@
 package com.bilalsafdar.godot.mobileservices.core
 
-import org.godotengine.godot.Dictionary
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -86,13 +85,4 @@ object Json {
 			emptyList()
 		}
 	}
-
-	/**
-	 * Godot's `Dictionary` as a flat map of its string keys.
-	 *
-	 * `Dictionary` is a `HashMap<String, Object>` carrying whatever Variant
-	 * types the caller put in, which is exactly what the analytics bridge wants
-	 * to iterate.
-	 */
-	fun fromGodot(dictionary: Dictionary): Map<String, Any?> = dictionary
 }

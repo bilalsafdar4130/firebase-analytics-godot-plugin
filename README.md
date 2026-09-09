@@ -153,7 +153,7 @@ whole SDK is built around.
 | | |
 |---|---|
 | GDScript SDK | Complete. Covered by headless tests in CI. |
-| Android native | Complete. Built from source by CI on every push. |
+| Android native | Complete. All six modules built from source by CI on every push, both variants, against the engine's own library. |
 | iOS native | **Preview.** Complete sources, not yet built in CI — building them needs macOS and Xcode, which this repository's CI does not have. Build and verify on a Mac before shipping. See [`docs/ios.md`](docs/ios.md). |
 
 ## Support
