@@ -66,7 +66,7 @@ func _on_initialization_failed(error: Dictionary) -> void:
 
 func _refresh_status() -> void:
 	var parts := PackedStringArray()
-	parts.append("state: %s" % MobileServices.State.keys()[MobileServices.get_state()])
+	parts.append("state: %s" % MobileServices.get_state_name())
 	parts.append("ads: %s" % ("ready" if MobileServices.ads.is_ready() else "unavailable"))
 	parts.append("iap: %s" % ("ready" if MobileServices.iap.is_ready() else "unavailable"))
 	status.text = "  |  ".join(parts)

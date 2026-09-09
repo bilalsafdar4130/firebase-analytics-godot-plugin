@@ -269,7 +269,9 @@ func _on_native_products_loaded(products_json: String) -> void:
 		var product := config.get_product_by_store_id(str(entry.get("id", "")))
 		if product.is_empty():
 			continue
-		var info := entry.duplicate()
+		# Typed explicitly: `entry` is a Variant out of an untyped Array, so `:=`
+		# has nothing to infer from and Godot refuses to compile the file.
+		var info: Dictionary = entry.duplicate()
 		info["product"] = product["name"]
 		info["type"] = product["type"]
 		_catalogue[str(product["name"])] = info

@@ -22,6 +22,7 @@ if not problem.is_empty():
 | `initialize(overrides := {}) -> void` | Starts every enabled service. Idempotent. `overrides` merges over the config file for this run: `initialize({"core": {"test_mode": true}})`. |
 | `is_initialized() -> bool` | |
 | `get_state() -> State` | `NOT_INITIALIZED`, `INITIALIZING`, `INITIALIZED`, `FAILED`. |
+| `get_state_name() -> String` | The same as a word, for a log line or a debug screen. |
 | `shutdown() -> void` | Stops everything and releases native resources. |
 | `get_diagnostics() -> Dictionary` | Everything the SDK knows about itself. No ids, keys or tokens. |
 | `get_diagnostics_text() -> String` | The same, formatted for a label. |

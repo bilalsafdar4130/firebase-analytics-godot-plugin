@@ -207,6 +207,15 @@ func get_state() -> State:
 	return _state
 
 
+## The state as a word, for a diagnostics screen or a log line.
+##
+## Exists so callers do not have to reach `MobileServices.State` through the
+## autoload instance to render it, which GDScript's analyser does not always
+## resolve.
+func get_state_name() -> String:
+	return str(State.keys()[_state])
+
+
 ## Stops every service and releases native resources.
 ##
 ## Rarely needed — the OS tears the process down anyway — but a game that
@@ -240,7 +249,7 @@ func get_diagnostics() -> Dictionary:
 		"os_version": OS.get_version(),
 		"model": OS.get_model_name(),
 		"debug_build": OS.is_debug_build(),
-		"state": State.keys()[_state],
+		"state": get_state_name(),
 		"native_plugins": natives,
 		"config": config.summary() if config != null else {},
 		"services": {},
