@@ -330,7 +330,23 @@ func _get_android_manifest_application_element_contents(
 ## Safety form treats a declared AD_ID permission as a declaration that the ID
 ## is collected, and a mismatch is a policy rejection.
 func _ad_id_permission_xml() -> String:
-	if _modules.has("ads"):
+	return ad_id_permission_xml(_modules.has("ads"))
+
+
+## The same decision, as a pure function of one bool.
+##
+## SEPARATE FROM THE METHOD ABOVE SO IT CAN BE TESTED. `EditorExportPlugin`
+## cannot be instantiated outside the editor -- `ClassDB.can_instantiate()`
+## answers false in a game runtime -- so a game's headless compliance check
+## cannot construct this plugin to exercise the branches. It would get `null`,
+## every assertion against it would error rather than fail, and a check that
+## never runs is a check that always passes.
+##
+## Both branches matter and exactly one is right at a time, so both are reachable
+## from a test that needs no editor. See tests/test_ad_id_permission.gd, and
+## SparkLogic's tools/verify_compliance.gd, which drives both.
+static func ad_id_permission_xml(has_ads: bool) -> String:
+	if has_ads:
 		return (
 			"    <!-- This build serves ads, which read the advertising ID, so the\n"
 			+ "         permission the ad SDK declares is left in place. -->"
