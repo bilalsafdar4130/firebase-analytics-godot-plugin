@@ -53,7 +53,17 @@ env:
   # The engine version whose build template the plugins compile against. The
   # toolchain in android/build.gradle.kts is copied from THIS version's
   # config.gradle — see docs/versions.md before changing either.
-  GODOT_VERSION: "4.4.1"
+  #
+  # 4.6, because that is what Blaze Assembly and SparkLogic export with — and it
+  # is not only the engine library that comes from the template. The GRADLE
+  # WRAPPER does too, and android/build.gradle.kts needs AGP 8.6.1, which
+  # requires Gradle 8.7+. 4.4.1's template ships Gradle 8.2 and would refuse to
+  # run it; 4.6's ships 8.11.1. The two move together or neither does.
+  #
+  # Kotlin is the half that bites hardest: 4.6's godot-lib carries Kotlin 2.1.0
+  # metadata, and a 1.9.x compiler cannot read it at all — every module fails,
+  # with an error naming the engine rather than this repository.
+  GODOT_VERSION: "4.6"
   GODOT_RELEASE: "stable"
 
 jobs:
