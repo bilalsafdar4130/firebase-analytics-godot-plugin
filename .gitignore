@@ -14,6 +14,9 @@ addons/mobile_services/ios/build/
 addons/mobile_services/ios/plugins/*.xcframework/
 addons/mobile_services/.godot-source/
 
+# CI's cached copy of the Godot Android build template (see .github/workflows).
+.godot-template/
+
 # Per-game secrets and configuration. NONE of these belong in the addon's
 # repository — a game keeps its own.
 google-services.json

@@ -30,8 +30,10 @@ time.
    git tag -a v2.1.0 -m "Mobile Services 2.1.0"
    git push origin v2.1.0
    ```
-7. **Create the GitHub release** and attach the built AARs (and xcframeworks, if
-   you built them). CI builds the Android AARs on every tag and attaches them.
+7. **Create the GitHub release.** Pushing the tag runs `.github/workflows/
+   release.yml`, which calls the ordinary Android build and attaches the release
+   AARs — so what ships is what CI checks, not a separate build of it. Add the
+   iOS xcframeworks by hand if you built them.
 8. **Install it into one game**, run the matrix again there, and only then update
    the others.
 
