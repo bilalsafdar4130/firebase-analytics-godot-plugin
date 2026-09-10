@@ -24,7 +24,37 @@ func run() -> Array[MSTestCase]:
 		_an_ads_build_keeps_it(),
 		_an_ad_free_build_takes_it_back_out(),
 		_the_two_branches_disagree(),
+		_the_ad_services_tie_is_broken(),
 	]
+
+
+## The <property> that stops a build carrying BOTH ads and Firebase.
+##
+## WHY THIS IS HERE AND NOT ONLY IN A GAME. `play-services-ads` and
+## `play-services-measurement-api` each declare
+## `android.adservices.AD_SERVICES_CONFIG` pointing at a different xml resource.
+## Neither outranks the other, so the manifest merger REFUSES the build -- not a
+## warning, not a runtime surprise, a failed export. Only the app can break the
+## tie, and this addon is what writes the app's manifest.
+##
+## It went unnoticed until SparkLogic became the first project to ship the `ads`
+## and `firebase` modules together; every build before that carried one or the
+## other.
+func _the_ad_services_tie_is_broken() -> MSTestCase:
+	var test := MSTestCase.new("the AD_SERVICES_CONFIG tie-breaker is well formed")
+	var xml := AndroidExport.ad_services_config_xml()
+	test.contains(xml, AndroidExport.AD_SERVICES_CONFIG_PROPERTY, "names the property")
+	test.contains(
+		xml,
+		AndroidExport.AD_SERVICES_CONFIG_RESOURCE,
+		"and keeps the ads SDK's resource, which is the superset"
+	)
+	test.contains(
+		xml,
+		'tools:replace="android:resource"',
+		"with the merger's own override mechanism, or it is just a third opinion"
+	)
+	return test
 
 
 func _an_ads_build_keeps_it() -> MSTestCase:
