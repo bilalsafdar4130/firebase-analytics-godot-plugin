@@ -6,18 +6,36 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 //
 // EVERY VERSION BELOW IS COPIED FROM THE ENGINE'S OWN ANDROID TEMPLATE
 // (platform/android/java/app/config.gradle at the Godot tag this addon targets:
-// AGP 8.2.0, Gradle 8.2, Kotlin 1.9.20, compileSdk 34, minSdk 21, Java 17).
+// GODOT 4.6 — AGP 8.6.1, Kotlin 2.1.20, compileSdk 35, Java 17,
+// and a Gradle 8.11.1 wrapper).
 //
-// THIS IS A HARD CONSTRAINT, NOT A PREFERENCE. Two reasons, and the second is
-// the one that bites:
+// THIS IS A HARD CONSTRAINT, NOT A PREFERENCE. Three reasons, and the third is
+// the one that actually broke a build:
 //
 //  1. The build script drives these modules with the WRAPPER FROM THE TEMPLATE,
-//     so Gradle's version is the engine's. AGP 8.6 refuses to run on Gradle 8.2
-//     — "Minimum supported Gradle version is 8.7" — and the build stops there.
+//     so Gradle's version is the engine's. An AGP newer than that wrapper
+//     supports refuses to run — "Minimum supported Gradle version is …" — and
+//     the build stops there. 4.6 ships a wrapper new enough for AGP 8.6.1
+//     because the engine's own build uses it.
 //
 //  2. An AAR records the minimum AGP that may consume it. A plugin built with a
 //     newer AGP than the app's is rejected by the APP'S build, long after this
 //     one succeeded, with an error that names neither this addon nor the reason.
+//
+//  3. KOTLIN METADATA IS VERSIONED AND IT IS NOT FORGIVING. Every module here
+//     compiles against `godot-lib.jar` from the template, and that jar is
+//     compiled by whatever Kotlin the ENGINE used. A compiler older than the
+//     metadata cannot read the class at all:
+//
+//       Class 'org.godotengine.godot.Godot' was compiled with an incompatible
+//       version of Kotlin. The actual metadata version is 2.1.0, but the
+//       compiler version 1.9.0 can read versions up to 2.0.0.
+//
+//     That is what these numbers being a release behind cost: Godot 4.6's
+//     godot-lib carries Kotlin 2.1.0 metadata, and Kotlin 1.9.20 — correct for
+//     4.4.1, which is what this file used to target — cannot open it. Every
+//     module fails to compile, and the error names the engine rather than this
+//     file.
 //
 // So on a Godot upgrade: read that config.gradle for the new version and move
 // these to match. docs/versions.md says the same thing in prose.
@@ -27,8 +45,8 @@ buildscript {
 		mavenCentral()
 	}
 	dependencies {
-		classpath("com.android.tools.build:gradle:8.2.0")
-		classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.20")
+		classpath("com.android.tools.build:gradle:8.6.1")
+		classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.20")
 	}
 }
 
@@ -48,7 +66,7 @@ subprojects {
 	apply(plugin = "org.jetbrains.kotlin.android")
 
 	extensions.configure<LibraryExtension>("android") {
-		compileSdk = 34
+		compileSdk = 35
 		defaultConfig {
 			// AT OR BELOW THE HOST APP'S FLOOR. A library that demands more than
 			// the app does fails the app's manifest merge, and 21 is what Godot's

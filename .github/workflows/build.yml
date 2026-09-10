@@ -27,7 +27,13 @@ concurrency:
 env:
   # Must match the version games export with; the plugins compile against the
   # engine library from THIS version's Android build template.
-  GODOT_VERSION: "4.4.1"
+  #
+  # 4.6, because that is what Blaze Assembly and SparkLogic export with -- and
+  # because it is not only the engine library that comes from the template. The
+  # GRADLE WRAPPER does too, and android/build.gradle.kts now needs AGP 8.6.1
+  # (Gradle 8.7+). 4.4.1's template ships Gradle 8.2, which would refuse to run
+  # it. The two move together or neither does; see docs/versions.md.
+  GODOT_VERSION: "4.6"
   GODOT_RELEASE: "stable"
 
 jobs:
