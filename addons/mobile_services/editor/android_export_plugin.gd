@@ -93,6 +93,11 @@ const IDENTIFIER_META := {
 
 const AD_ID_PERMISSION := "com.google.android.gms.permission.AD_ID"
 
+## The <property> both play-services-ads and play-services-measurement-api
+## declare, each pointing at its own xml resource. See `ad_services_config_xml`.
+const AD_SERVICES_CONFIG_PROPERTY := "android.adservices.AD_SERVICES_CONFIG"
+const AD_SERVICES_CONFIG_RESOURCE := "@xml/gma_ad_services_config"
+
 ## The public half of the Firebase configuration, written into the package so
 ## GDScript can reach it.
 ##
@@ -305,6 +310,23 @@ func _get_android_manifest_application_element_contents(
 				'        <meta-data android:name="applovin.sdk.key" android:value="%s" />'
 				% _escape(str(_config.ads["applovin_sdk_key"]))
 			)
+	# BOTH GOOGLE SDKs CLAIM THIS PROPERTY, AND ONLY THE APP CAN BREAK THE TIE.
+	#
+	# `play-services-ads` and `play-services-measurement-api` (which arrives with
+	# firebase-analytics) each declare a <property> of this name pointing at a
+	# DIFFERENT xml resource. Neither outranks the other, so a build carrying both
+	# modules does not merge at all:
+	#
+	#   Manifest merger failed : Attribute
+	#   property#android.adservices.AD_SERVICES_CONFIG@resource
+	#   value=(@xml/gma_ad_services_config) from play-services-ads-lite ...
+	#   is also present at ...measurement-api value=(@xml/ga_ad_services_config).
+	#
+	# ONLY when both are in the build. Emitting it with just one would declare a
+	# `tools:replace` for an attribute nothing else contributes, and the merger
+	# fails that too -- which is why this is not simply always written.
+	if _modules.has("ads") and _modules.has("firebase"):
+		lines.append(_ad_services_config_xml())
 	if _modules.has("playgames"):
 		# A string RESOURCE rather than a literal: the value is numeric, and the
 		# manifest merger turns a bare number into an integer attribute that
@@ -321,6 +343,33 @@ func _get_android_manifest_application_element_contents(
 	return "\n".join(lines)
 
 
+## The tie-breaking `<property>` for AD_SERVICES_CONFIG.
+##
+## `tools:replace` is the manifest merger's own mechanism for an app overriding a
+## value two libraries disagree about, and this manifest outranks every AAR in
+## the merge. The `tools` namespace is declared by the engine's own manifest
+## template.
+##
+## THE GMA RESOURCE IS THE ONE TO KEEP in a build that serves ads: it is the
+## superset, declaring the Privacy Sandbox attribution topics the ads SDK needs,
+## and Analytics reads its own configuration through the SDK rather than from
+## this property.
+static func ad_services_config_xml() -> String:
+	return "\n".join(PackedStringArray([
+		"        <!-- play-services-ads and firebase-analytics each declare this",
+		"             property with a different resource and the merger cannot",
+		"             pick. The app breaks the tie, keeping the ads SDK's",
+		"             superset. -->",
+		'        <property android:name="%s"' % AD_SERVICES_CONFIG_PROPERTY,
+		'            android:resource="%s"' % AD_SERVICES_CONFIG_RESOURCE,
+		'            tools:replace="android:resource" />',
+	]))
+
+
+func _ad_services_config_xml() -> String:
+	return ad_services_config_xml()
+
+
 ## The advertising-ID permission, kept or taken back out.
 ##
 ## `firebase-analytics` and the ad SDKs declare it themselves, and
@@ -330,7 +379,23 @@ func _get_android_manifest_application_element_contents(
 ## Safety form treats a declared AD_ID permission as a declaration that the ID
 ## is collected, and a mismatch is a policy rejection.
 func _ad_id_permission_xml() -> String:
-	if _modules.has("ads"):
+	return ad_id_permission_xml(_modules.has("ads"))
+
+
+## The same decision, as a pure function of one bool.
+##
+## SEPARATE FROM THE METHOD ABOVE SO IT CAN BE TESTED. `EditorExportPlugin`
+## cannot be instantiated outside the editor -- `ClassDB.can_instantiate()`
+## answers false in a game runtime -- so a game's headless compliance check
+## cannot construct this plugin to exercise the branches. It would get `null`,
+## every assertion against it would error rather than fail, and a check that
+## never runs is a check that always passes.
+##
+## Both branches matter and exactly one is right at a time, so both are reachable
+## from a test that needs no editor. See tests/test_ad_id_permission.gd, and
+## SparkLogic's tools/verify_compliance.gd, which drives both.
+static func ad_id_permission_xml(has_ads: bool) -> String:
+	if has_ads:
 		return (
 			"    <!-- This build serves ads, which read the advertising ID, so the\n"
 			+ "         permission the ad SDK declares is left in place. -->"

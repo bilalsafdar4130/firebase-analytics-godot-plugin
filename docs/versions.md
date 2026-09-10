@@ -4,31 +4,46 @@
 
 | | |
 |---|---|
-| Godot | 4.3 – 4.5. Developed and built in CI against **4.4.1**. |
-| Android | minSdk **21**, compileSdk **34**, targetSdk whatever your export preset sets (Play requires 34+) |
+| Godot | 4.3 – 4.6. Developed and built in CI against **4.6**. |
+| Android | minSdk **21**, compileSdk **35**, targetSdk whatever your export preset sets (Play requires 34+) |
 | Android ABIs | `arm64-v8a` (required), `armeabi-v7a` (works). `x86_64` only for emulators. |
 | iOS | **14.0**+, arm64. The floor is set by `AppTrackingTransparency`. |
 | JDK | **17** |
-| Kotlin | 1.9.20 |
-| Android Gradle Plugin | 8.2.0 |
-| Gradle | 8.2 (the wrapper from the engine's own build template) |
+| Kotlin | 2.1.20 |
+| Android Gradle Plugin | 8.6.1 |
+| Gradle | 8.11.1 (the wrapper from the engine's own build template) |
 
 ## Why those exact Android versions
 
 **They are copied from the engine, and they are a hard constraint.** Godot's
 Android build template pins them in
-`platform/android/java/app/config.gradle`; for 4.4.1 that is AGP 8.2.0, Gradle
-8.2, Kotlin 1.9.20, compileSdk 34, minSdk 21, Java 17.
+`platform/android/java/app/config.gradle`; for 4.6 that is AGP 8.6.1, Gradle
+8.11.1, Kotlin 2.1.20, compileSdk 35, minSdk 24, Java 17.
 
-Two things break if this addon drifts from them, and the second is the one that
-bites:
+Three things break if this addon drifts from them, and the third is the one that
+actually broke a build:
 
 1. `tools/build_android.sh` drives these modules with the **wrapper from the
-   template**, so Gradle's version is the engine's. A newer AGP simply refuses to
-   run — *"Minimum supported Gradle version is 8.7. Current version is 8.2."*
+   template**, so Gradle's version is the engine's. An AGP newer than that
+   wrapper supports simply refuses to run — *"Minimum supported Gradle version
+   is 8.7. Current version is 8.2."*
 2. An AAR records the minimum AGP that may consume it. A plugin built with a
    newer AGP than the app's is rejected by **the game's** build, long after this
    one succeeded, with an error naming neither this addon nor the reason.
+3. **Kotlin metadata is versioned, and older compilers cannot read newer
+   metadata.** Every module compiles against `godot-lib.jar` from the template,
+   which the *engine* compiled with *its* Kotlin. Drift the other way and nothing
+   compiles at all:
+
+   ```
+   Class 'org.godotengine.godot.Godot' was compiled with an incompatible version
+   of Kotlin. The actual metadata version is 2.1.0, but the compiler version
+   1.9.0 can read versions up to 2.0.0.
+   ```
+
+   That is exactly what a game on Godot 4.6 hit while this file still said
+   1.9.20 — correct for 4.4.1, and unable to open 4.6's `godot-lib` at all. The
+   error names the engine, not this addon.
 
 **On a Godot upgrade:** read that `config.gradle` at the new tag and move
 `android/build.gradle.kts` to match. That is the whole procedure.
@@ -57,11 +72,15 @@ The Firebase versions are what **BOM 33.7.0** resolves to. The BOM itself is not
 used: Godot's export API inserts each dependency as `implementation
 '<coordinate>'`, and `platform(...)` is Gradle syntax rather than a coordinate.
 
-**Every version above is the newest that still builds at compileSdk 34**, which
-is what Godot 4.4's template uses. The next major of each — Google Mobile Ads 24,
-Play Billing 8, Firebase BOM 33.10+ — requires compileSdk 35, and would fail the
-*game's* export rather than this addon's build. So these move when Godot's
-template moves, not before.
+These were pinned as **the newest that still built at compileSdk 34**, which is
+what Godot 4.4's template used: the next major of each — Google Mobile Ads 24,
+Play Billing 8, Firebase BOM 33.10+ — required compileSdk 35 and would have
+failed the *game's* export rather than this addon's build.
+
+**That ceiling has lifted** now the toolchain follows Godot 4.6 (compileSdk 35),
+but the dependency versions above have deliberately NOT been raised with it. They
+work, and a dependency bump is its own change with its own testing — not a rider
+on a toolchain fix. These move when somebody moves them on purpose.
 
 ### Bumping one
 

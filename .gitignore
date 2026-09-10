@@ -34,3 +34,9 @@ firebase_client.cfg
 # Local editor state
 export_presets.cfg
 .DS_Store
+
+# Godot 4.4+ writes a .uid next to every script when it imports the project.
+# They are generated, this repository has never tracked them, and they are easy
+# to sweep into an unrelated commit with `git add -A` after opening the addon in
+# an editor. Ignored so that cannot happen by accident.
+*.uid

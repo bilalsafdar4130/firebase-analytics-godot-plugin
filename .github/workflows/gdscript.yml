@@ -41,7 +41,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GODOT_VERSION: "4.4.1"
+  # Matches android.yml and what the games export with. See the note there.
+  GODOT_VERSION: "4.6"
   GODOT_RELEASE: "stable"
 
 jobs:

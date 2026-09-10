@@ -19,6 +19,7 @@ const TESTS := [
 	preload("res://tests/test_analytics_rules.gd"),
 	preload("res://tests/test_errors.gd"),
 	preload("res://tests/test_versions.gd"),
+	preload("res://tests/test_ad_id_permission.gd"),
 ]
 
 
