@@ -43,6 +43,7 @@ public:
 	void sign_in();
 	void unlock_achievement(const String &p_id);
 	void increment_achievement(const String &p_id, int p_steps);
+	void load_achievements();
 	void show_achievements();
 	void submit_score(const String &p_leaderboard_id, int p_score);
 	void show_leaderboard(const String &p_leaderboard_id);
@@ -54,6 +55,7 @@ public:
 	void report_signed_in(const String &p_id, const String &p_name);
 	void report_sign_in_failed(int p_code, const String &p_message);
 	void report_failed(const String &p_operation, int p_code, const String &p_message);
+	void report_achievements_loaded(const String &p_achievements_json);
 	void report_saved(const String &p_slot);
 	void report_loaded(const String &p_slot, const String &p_data_base64);
 

@@ -308,7 +308,17 @@ void MobileServicesFirebase::remote_config_fetch(int p_minimum_interval_seconds)
 		NSTimeInterval expiration = (NSTimeInterval)p_minimum_interval_seconds;
 		void (^completion)(NSInteger, NSError *) = ^(NSInteger status, NSError *error) {
 			if (error != nil) {
-				MS_EMIT("remote_config_failed", 2, ms_str(error.localizedDescription));
+				// Firebase reports a throttle as an ordinary NSError, and the two
+				// need different handling: a throttle means "you already have the
+				// cached values", a network error means "you do not". There is no
+				// documented, version-stable error code to switch on here, so —
+				// matching the reasoning the Android bridge uses for the same
+				// problem — the description is inspected for the word Firebase's
+				// SDK uses for it, rather than assuming every failure is a network
+				// error.
+				bool throttled =
+						[error.localizedDescription.lowercaseString containsString:@"throttl"];
+				MS_EMIT("remote_config_failed", throttled ? 1 : 2, ms_str(error.localizedDescription));
 				return;
 			}
 			if ([config respondsToSelector:@selector(activateWithCompletion:)]) {

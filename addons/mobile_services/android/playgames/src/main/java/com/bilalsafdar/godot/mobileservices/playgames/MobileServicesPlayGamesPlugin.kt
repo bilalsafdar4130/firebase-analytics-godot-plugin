@@ -4,12 +4,15 @@ import android.util.Base64
 import com.google.android.gms.games.PlayGames
 import com.google.android.gms.games.PlayGamesSdk
 import com.google.android.gms.games.SnapshotsClient
+import com.google.android.gms.games.achievement.Achievement
 import com.google.android.gms.games.snapshot.Snapshot
 import com.google.android.gms.games.snapshot.SnapshotMetadataChange
+import com.bilalsafdar.godot.mobileservices.core.Json
 import com.bilalsafdar.godot.mobileservices.core.MobileServicesPlugin
 import org.godotengine.godot.Godot
 import org.godotengine.godot.plugin.SignalInfo
 import org.godotengine.godot.plugin.UsedByGodot
+import org.json.JSONObject
 
 /**
  * Google Play Games Services v2.
@@ -115,10 +118,10 @@ class MobileServicesPlayGamesPlugin(godot: Godot) : MobileServicesPlugin(godot) 
 							loadPlayer()
 						} else {
 							authenticated = false
+							val error = attempt.exception
 							signal(
-								"play_games_sign_in_failed", CODE_CANCELLED,
-								attempt.exception?.message
-									?: "the player is not signed in to Play Games"
+								"play_games_sign_in_failed", classify(error),
+								error?.message ?: "the player is not signed in to Play Games"
 							)
 						}
 					}
@@ -164,6 +167,51 @@ class MobileServicesPlayGamesPlugin(godot: Godot) : MobileServicesPlugin(godot) 
 	fun incrementAchievement(achievementId: String, steps: Int) = onUi("incrementAchievement") {
 		val activity = getActivity() ?: return@onUi
 		PlayGames.getAchievementsClient(activity).increment(achievementId, steps)
+	}
+
+	/**
+	 * Every achievement this player has, with id, unlock state and progress.
+	 *
+	 * Answers on `play_games_achievements_loaded` — what a custom achievements
+	 * screen is built from, as an alternative to [showAchievements]'s platform
+	 * UI. `forceReload = true`: a game that just unlocked one wants the fresh
+	 * state, not whatever Play cached from the last call.
+	 */
+	@UsedByGodot
+	fun loadAchievements() = onUi("loadAchievements") {
+		val activity = getActivity() ?: return@onUi
+		PlayGames.getAchievementsClient(activity).load(true)
+			.addOnSuccessListener { data ->
+				safely("loadAchievements") {
+					val list = ArrayList<JSONObject>()
+					val buffer = data.get()
+					if (buffer != null) {
+						for (achievement in buffer) {
+							// currentSteps/totalSteps throw on a STANDARD (non-
+							// incremental) achievement; 0/100 is the honest answer
+							// for one that is simply locked or unlocked.
+							val incremental = achievement.type == Achievement.TYPE_INCREMENTAL
+							list.add(
+								Json.obj(
+									"id" to achievement.achievementId,
+									"name" to achievement.name,
+									"description" to achievement.description,
+									"state" to when (achievement.state) {
+										Achievement.STATE_UNLOCKED -> "unlocked"
+										Achievement.STATE_REVEALED -> "revealed"
+										else -> "hidden"
+									},
+									"current_steps" to if (incremental) achievement.currentSteps else 0,
+									"total_steps" to if (incremental) achievement.totalSteps else 100
+								)
+							)
+						}
+						buffer.release()
+					}
+					signal("play_games_achievements_loaded", Json.array(list))
+				}
+			}
+			.addOnFailureListener { error -> report("load_achievements", error) }
 	}
 
 	@UsedByGodot
@@ -305,13 +353,29 @@ class MobileServicesPlayGamesPlugin(godot: Godot) : MobileServicesPlugin(godot) 
 	 * does not just forward a message.
 	 */
 	private fun report(operation: String, error: Throwable) {
-		val code = when {
-			error.message?.contains("NETWORK", true) == true -> CODE_NETWORK
-			error.message?.contains("CANCEL", true) == true -> CODE_CANCELLED
-			error.message?.contains("SIGN_IN", true) == true -> CODE_NOT_READY
-			error.javaClass.simpleName.contains("ApiException") -> CODE_UNSUPPORTED
-			else -> CODE_UNSUPPORTED
-		}
-		signal("play_games_failed", operation, code, error.message ?: error.javaClass.simpleName)
+		signal(
+			"play_games_failed", operation, classify(error),
+			error.message ?: error.javaClass.simpleName
+		)
+	}
+
+	/**
+	 * Classifies any Play Services failure into this SDK's four codes.
+	 *
+	 * `null` (no exception at all — the ordinary shape of a player simply
+	 * declining the automatic sign-in prompt) stays CANCELLED, which is what
+	 * [signIn] relied on before this was pulled out of it. Everything else is
+	 * inspected the same way [report] always has, so a real failure — a
+	 * misconfigured `play_games_app_id`, a `DEVELOPER_ERROR`, a dead network —
+	 * is no longer flattened into "the player cancelled" just because it
+	 * happened during sign-in instead of an achievement or leaderboard call.
+	 */
+	private fun classify(error: Throwable?): Int = when {
+		error == null -> CODE_CANCELLED
+		error.message?.contains("NETWORK", true) == true -> CODE_NETWORK
+		error.message?.contains("CANCEL", true) == true -> CODE_CANCELLED
+		error.message?.contains("SIGN_IN", true) == true -> CODE_NOT_READY
+		error.javaClass.simpleName.contains("ApiException") -> CODE_UNSUPPORTED
+		else -> CODE_UNSUPPORTED
 	}
 }

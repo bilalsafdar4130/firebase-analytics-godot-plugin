@@ -73,9 +73,16 @@ static NSDictionary *ms_describe_transaction(SKPaymentTransaction *transaction) 
 		@"token" : identifier,
 		@"order_id" : identifier,
 		@"quantity" : @(transaction.payment.quantity),
-		// StoreKit has no acknowledgement, so a delivered transaction is
-		// reported as acknowledged and finished explicitly instead.
-		@"acknowledged" : @YES,
+		// FALSE ON PURPOSE, even though StoreKit has no separate acknowledgement
+		// step of its own. The GDScript side (ms_iap.gd) only calls native
+		// `acknowledge()` for a non-consumable/subscription when this says
+		// false — and that call is what reaches `finishTransaction:` below.
+		// Reporting true here, as an earlier version of this bridge did, made
+		// that GDScript check permanently skip itself: the transaction was
+		// never finished, and StoreKit redelivered it on every launch.
+		// Consumables are unaffected — they are finished by `consume()`
+		// unconditionally — this field only matters for the other two types.
+		@"acknowledged" : @NO,
 		@"auto_renewing" : @NO,
 	};
 }

@@ -150,7 +150,7 @@ bool MobileServicesCore::is_network_available() {
 String MobileServicesCore::get_native_version() {
 	// Must match MobileServices.VERSION in GDScript and BuildInfo.VERSION on
 	// Android; tests/test_versions.gd checks that they agree.
-	return String("2.0.0");
+	return String("2.1.0");
 }
 
 MobileServicesCore::MobileServicesCore() {

@@ -138,13 +138,20 @@ func _plist_content() -> String:
 		lines.append("<key>NSUserTrackingUsageDescription</key>")
 		lines.append("<string>%s</string>" % _escape(str(_config.consent["att_message"])))
 	if _modules.has("firebase"):
-		# Firebase's iOS SDK collects the IDFA through its ad-support component
-		# unless told otherwise; the SDK reads this before the app runs, so it
-		# cannot be set from GDScript. Same reasoning as the Android manifest.
-		lines.append("<key>GOOGLE_ANALYTICS_DEFAULT_ALLOW_AD_PERSONALIZATION_SIGNALS</key>")
-		lines.append("<false/>")
-		lines.append("<key>FIREBASE_ANALYTICS_COLLECTION_DEACTIVATED</key>")
-		lines.append("<false/>")
+		# The same four Consent Mode defaults the Android manifest sets to
+		# DENIED (see PRIVACY_META in android_export_plugin.gd) — Firebase's iOS
+		# SDK reads these before the app runs, so they cannot be set from
+		# GDScript, and any left unset default to GRANTED rather than denied.
+		# Leaving even one out is the same mistake as leaving it out of the
+		# Android manifest: an EEA build that collects before consent.
+		for key in [
+			"GOOGLE_ANALYTICS_DEFAULT_ALLOW_ANALYTICS_STORAGE",
+			"GOOGLE_ANALYTICS_DEFAULT_ALLOW_AD_STORAGE",
+			"GOOGLE_ANALYTICS_DEFAULT_ALLOW_AD_USER_DATA",
+			"GOOGLE_ANALYTICS_DEFAULT_ALLOW_AD_PERSONALIZATION_SIGNALS",
+		]:
+			lines.append("<key>%s</key>" % key)
+			lines.append("<false/>")
 	return "\n".join(lines)
 
 
