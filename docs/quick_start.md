@@ -110,7 +110,7 @@ Build a debug APK and install it. Then:
 adb logcat -s MobileServicesCore MobileServicesFirebase MobileServicesAds godot
 ```
 
-You should see `Mobile Services 2.0.0 starting`, then `admob initialised`, then
+You should see `Mobile Services 2.1.0 starting`, then `admob initialised`, then
 an ad loading. If you do not, `docs/troubleshooting.md` lists every failure with
 a known cause — start there rather than guessing.
 

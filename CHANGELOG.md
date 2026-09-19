@@ -3,6 +3,64 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## 2.1.0
+
+Bug fixes found by an audit of every native module, plus one small addition
+they turned up a gap next to.
+
+### Fixed
+
+- **iOS shipped every purchase as already acknowledged.** The StoreKit bridge
+  reported `"acknowledged": true` on every transaction, which is exactly the
+  value that makes the GDScript purchase handler skip calling `acknowledge()`
+  — the only thing that reaches `finishTransaction:` for a non-consumable or
+  a subscription. The result: those purchases were never finished, and
+  StoreKit redelivered them on every launch. Consumables were unaffected —
+  they finish through `consume()` unconditionally. Now reported as `false`,
+  which is what makes the existing GDScript logic finish them as designed.
+- **iOS Consent Mode only denied one of four defaults.** The Android manifest
+  has always defaulted all four Consent Mode flags (`analytics_storage`,
+  `ad_storage`, `ad_user_data`, `ad_personalization_signals`) to denied until
+  a consent decision is made; the iOS Info.plist was only writing the last of
+  the four, so an EEA build on iOS collected analytics and ad data before
+  the UMP form ever ran. All four are now written.
+- **A re-shown banner ignored its new position on Android.** `show_banner()`
+  is documented as idempotent — calling it again just moves the banner if the
+  position changed — but the reuse path (the ad view already exists) only
+  toggled visibility, on both the AdMob and AppLovin MAX providers. Fixed by
+  giving `BannerHost` a `reposition()` that updates the container's gravity.
+- **A real Play Games / Game Center sign-in failure was always reported as
+  the player cancelling.** A misconfigured `play_games_app_id`, a
+  `DEVELOPER_ERROR`, or no network all produced `MSError.USER_CANCELLED`
+  rather than `MSError.INITIALIZATION_FAILED`, hiding genuine integration
+  bugs behind a code games are told to ignore. Both platforms now classify
+  the failure the same way `operation_failed` already did for every other
+  call.
+- **Two of five ad formats never reported revenue on iOS.**
+  `rewarded_interstitial` and `app_open` loaded without a `paidEventHandler`,
+  so `ad_revenue_paid` — and the Firebase `ad_impression` event auto-sent
+  from it — silently never fired for them, while all five formats reported
+  correctly on Android.
+- **Every full-screen ad and every banner leaked on iOS.** Each one's
+  `paidEventHandler` block was stored on the ad object itself and captured
+  that same object strongly, a self-retain cycle that kept it alive forever
+  regardless of `destroy_ad()`. All five ad objects now capture weakly.
+- **Remote Config throttling was always reported as a network error on
+  iOS.** Android already told throttling (you already have the cached
+  values — not a fault) apart from an actual network failure; the iOS
+  bridge reported both as `NETWORK_ERROR`, which can turn an ordinary
+  "already fetched recently" into a bogus "check your connection" in a
+  game's UI.
+
+### Added
+
+- **`MobileServices.play_games.load_achievements()`**, on both platforms.
+  The signal it answers on (`achievements_loaded`) and its GDScript handler
+  already existed on both native sides but nothing ever emitted it; games
+  connecting to it waited forever. Answers with each achievement's id,
+  unlock state and progress, for a custom achievements screen instead of
+  `show_achievements()`'s platform UI.
+
 ## 2.0.0
 
 The addon becomes a general mobile services SDK for Godot games, on Android and

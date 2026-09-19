@@ -197,5 +197,5 @@ adb logcat -s MobileServicesCore MobileServicesFirebase MobileServicesAds \
             MobileServicesBilling MobileServicesPlayGames godot
 ```
 
-You are looking for `Mobile Services 2.0.0 starting`, then one line per service.
+You are looking for `Mobile Services 2.1.0 starting`, then one line per service.
 Anything missing is in [`troubleshooting.md`](troubleshooting.md).

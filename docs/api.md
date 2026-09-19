@@ -26,7 +26,7 @@ if not problem.is_empty():
 | `shutdown() -> void` | Stops everything and releases native resources. |
 | `get_diagnostics() -> Dictionary` | Everything the SDK knows about itself. No ids, keys or tokens. |
 | `get_diagnostics_text() -> String` | The same, formatted for a label. |
-| `VERSION` | `"2.0.0"`. |
+| `VERSION` | `"2.1.0"`. |
 
 **Signals**
 
@@ -162,6 +162,7 @@ Play Games Services on Android, Game Center on iOS, same names.
 | `is_supported(feature) -> bool` | `"achievements"`, `"leaderboards"`, `"saved_games"`, `"server_access"`. |
 | `unlock_achievement(id)` | |
 | `increment_achievement(id, steps)` | |
+| `load_achievements()` | Answers on `achievements_loaded`. |
 | `show_achievements()` | |
 | `submit_score(leaderboard_id, score)` | |
 | `show_leaderboard(id := "")` | |

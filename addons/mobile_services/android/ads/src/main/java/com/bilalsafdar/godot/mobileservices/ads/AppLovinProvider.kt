@@ -132,6 +132,7 @@ internal class AppLovinProvider(
 	override fun showBanner(placement: String, unitId: String, position: String) {
 		val existing = bannerViews[placement]
 		if (existing != null) {
+			banners.reposition(placement, position)
 			banners.setVisible(placement, true)
 			existing.startAutoRefresh()
 			return

@@ -247,10 +247,13 @@ void MobileServicesAds::load_ad(const String &p_placement, const String &p_forma
 							  completionHandler:^(GADInterstitialAd *ad, NSError *error) {
 								  if (error != nil) { failed(error); return; }
 								  ad.fullScreenContentDelegate = slot;
+								  __weak typeof(ad) weakAd = ad;
 								  ad.paidEventHandler = ^(GADAdValue *value) {
-									  [slot reportRevenue:value
-												  network:ad.responseInfo.loadedAdNetworkResponseInfo
-																  .adSourceName];
+								  	__strong typeof(ad) strongAd = weakAd;
+								  	if (strongAd == nil) { return; }
+								  	[slot reportRevenue:value
+								  			network:strongAd.responseInfo.loadedAdNetworkResponseInfo
+								  					.adSourceName];
 								  };
 								  slot.fullScreenAd = ad;
 								  loaded();
@@ -261,10 +264,13 @@ void MobileServicesAds::load_ad(const String &p_placement, const String &p_forma
 						  completionHandler:^(GADRewardedAd *ad, NSError *error) {
 							  if (error != nil) { failed(error); return; }
 							  ad.fullScreenContentDelegate = slot;
+							  __weak typeof(ad) weakAd = ad;
 							  ad.paidEventHandler = ^(GADAdValue *value) {
-								  [slot reportRevenue:value
-											  network:ad.responseInfo.loadedAdNetworkResponseInfo
-															  .adSourceName];
+							  	__strong typeof(ad) strongAd = weakAd;
+							  	if (strongAd == nil) { return; }
+							  	[slot reportRevenue:value
+							  			network:strongAd.responseInfo.loadedAdNetworkResponseInfo
+							  					.adSourceName];
 							  };
 							  slot.fullScreenAd = ad;
 							  loaded();
@@ -275,6 +281,14 @@ void MobileServicesAds::load_ad(const String &p_placement, const String &p_forma
 									  completionHandler:^(GADRewardedInterstitialAd *ad, NSError *error) {
 										  if (error != nil) { failed(error); return; }
 										  ad.fullScreenContentDelegate = slot;
+										  __weak typeof(ad) weakAd = ad;
+										  ad.paidEventHandler = ^(GADAdValue *value) {
+											  __strong typeof(ad) strongAd = weakAd;
+											  if (strongAd == nil) { return; }
+											  [slot reportRevenue:value
+														  network:strongAd.responseInfo.loadedAdNetworkResponseInfo
+																	  .adSourceName];
+										  };
 										  slot.fullScreenAd = ad;
 										  loaded();
 									  }];
@@ -284,6 +298,14 @@ void MobileServicesAds::load_ad(const String &p_placement, const String &p_forma
 						 completionHandler:^(GADAppOpenAd *ad, NSError *error) {
 							 if (error != nil) { failed(error); return; }
 							 ad.fullScreenContentDelegate = slot;
+							 __weak typeof(ad) weakAd = ad;
+							 ad.paidEventHandler = ^(GADAdValue *value) {
+								 __strong typeof(ad) strongAd = weakAd;
+								 if (strongAd == nil) { return; }
+								 [slot reportRevenue:value
+											 network:strongAd.responseInfo.loadedAdNetworkResponseInfo
+														 .adSourceName];
+							 };
 							 slot.fullScreenAd = ad;
 							 loaded();
 						 }];
@@ -368,9 +390,16 @@ void MobileServicesAds::show_banner(const String &p_placement, const String &p_u
 		banner.adUnitID = slot.unitID;
 		banner.rootViewController = controller;
 		banner.delegate = slot;
+		// Weakly captured for the same reason as the full-screen formats above: a
+		// block stored ON `banner` that strongly captures `banner` is a self-retain
+		// cycle, and destroy_ad() removing it from its superview would not be
+		// enough to release it.
+		__weak GADBannerView *weakBanner = banner;
 		banner.paidEventHandler = ^(GADAdValue *value) {
+			__strong GADBannerView *strongBanner = weakBanner;
+			if (strongBanner == nil) { return; }
 			[slot reportRevenue:value
-						network:banner.responseInfo.loadedAdNetworkResponseInfo.adSourceName];
+						network:strongBanner.responseInfo.loadedAdNetworkResponseInfo.adSourceName];
 		};
 		banner.translatesAutoresizingMaskIntoConstraints = NO;
 		[controller.view addSubview:banner];

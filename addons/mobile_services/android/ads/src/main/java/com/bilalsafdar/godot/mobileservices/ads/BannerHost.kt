@@ -27,21 +27,23 @@ internal class BannerHost(private val activity: Activity) {
 
 	private val containers = HashMap<String, FrameLayout>()
 
-	fun attach(placement: String, view: View, position: String) {
-		detach(placement)
-		val container = FrameLayout(activity)
-		container.fitsSystemWindows = true
-		val gravity = if (position == "top") {
+	private fun gravityFor(position: String): Int =
+		if (position == "top") {
 			Gravity.TOP or Gravity.CENTER_HORIZONTAL
 		} else {
 			Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
 		}
+
+	fun attach(placement: String, view: View, position: String) {
+		detach(placement)
+		val container = FrameLayout(activity)
+		container.fitsSystemWindows = true
 		container.addView(
 			view,
 			FrameLayout.LayoutParams(
 				ViewGroup.LayoutParams.WRAP_CONTENT,
 				ViewGroup.LayoutParams.WRAP_CONTENT,
-				gravity
+				gravityFor(position)
 			)
 		)
 		activity.addContentView(
@@ -52,6 +54,24 @@ internal class BannerHost(private val activity: Activity) {
 			)
 		)
 		containers[placement] = container
+	}
+
+	/**
+	 * Moves an already-shown banner to the other edge without reloading it.
+	 *
+	 * `show_banner()` is documented as idempotent — calling it again just moves
+	 * the banner if the position changed — so the provider's reuse path (the ad
+	 * view already exists) has to be able to do that rather than only toggling
+	 * visibility.
+	 */
+	fun reposition(placement: String, position: String) {
+		val container = containers[placement] ?: return
+		val view = container.getChildAt(0) ?: return
+		val params = view.layoutParams as? FrameLayout.LayoutParams ?: return
+		val gravity = gravityFor(position)
+		if (params.gravity == gravity) return
+		params.gravity = gravity
+		view.layoutParams = params
 	}
 
 	fun setVisible(placement: String, visible: Boolean) {

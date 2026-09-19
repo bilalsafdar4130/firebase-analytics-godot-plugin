@@ -215,6 +215,7 @@ internal class AdMobProvider(
 	override fun showBanner(placement: String, unitId: String, position: String) {
 		val existing = ads[placement]
 		if (existing?.view != null) {
+			banners.reposition(placement, position)
 			banners.setVisible(placement, true)
 			return
 		}

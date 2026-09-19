@@ -132,6 +132,24 @@ func increment_achievement(achievement_id: String, steps: int) -> Dictionary:
 	return {}
 
 
+## Asks the platform for this player's achievements — id, unlock state and
+## progress for each. Answers on [signal achievements_loaded]; use it to build
+## a custom achievements screen instead of [method show_achievements]'s
+## platform UI.
+##
+## Game Center has no "every achievement that exists" call the way Play Games
+## does: it reports only what the player has made progress on, with no
+## hidden/revealed distinction for what it returns. A game that wants a fixed
+## list of every possible achievement should keep its own catalogue and merge
+## this progress into it. See docs/play_games.md.
+func load_achievements() -> Dictionary:
+	var problem := guard("load achievements")
+	if not problem.is_empty():
+		return problem
+	native.call_method("loadAchievements")
+	return {}
+
+
 ## Opens the platform's own achievements UI. There is no way to build this
 ## screen yourself from the APIs, and no need to.
 func show_achievements() -> Dictionary:

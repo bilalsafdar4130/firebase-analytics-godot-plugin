@@ -24,6 +24,22 @@ answers per feature, and the differences that leak through are these:
 | Server-side identity | `requestServerSideAccess` → a one-time auth code | none; use `GKLocalPlayer` identity verification |
 | `is_supported("server_access")` | `true` | `false` |
 
+### Reading achievements back
+
+```gdscript
+MobileServices.play_games.achievements_loaded.connect(func(achievements):
+    for entry in achievements:
+        print(entry["id"], entry["state"], entry["current_steps"], "/", entry["total_steps"])
+)
+MobileServices.play_games.load_achievements()
+```
+
+For a custom achievements screen instead of `show_achievements()`'s platform UI.
+Game Center has no "every achievement that exists" call the way Play Games
+does — it reports only what the player has made progress on (`state` is
+`"unlocked"` or `"revealed"`, never `"hidden"`), so a fixed catalogue of every
+possible achievement is yours to keep and merge this progress into.
+
 ### Incremental achievements
 
 Play Games takes a number of **steps to add**; Game Center stores a

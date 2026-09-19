@@ -71,6 +71,7 @@ void MobileServicesGameCenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("unlockAchievement", "id"), &MobileServicesGameCenter::unlock_achievement);
 	ClassDB::bind_method(D_METHOD("incrementAchievement", "id", "steps"),
 			&MobileServicesGameCenter::increment_achievement);
+	ClassDB::bind_method(D_METHOD("loadAchievements"), &MobileServicesGameCenter::load_achievements);
 	ClassDB::bind_method(D_METHOD("showAchievements"), &MobileServicesGameCenter::show_achievements);
 	ClassDB::bind_method(D_METHOD("submitScore", "leaderboard_id", "score"),
 			&MobileServicesGameCenter::submit_score);
@@ -136,7 +137,21 @@ void MobileServicesGameCenter::sign_in() {
 				plugin->report_signed_in(ms_str([GKLocalPlayer localPlayer].gamePlayerID),
 						ms_str([GKLocalPlayer localPlayer].displayName));
 			} else {
-				plugin->report_sign_in_failed(MS_GC_CANCELLED,
+				// A nil error is an ordinary decline. A real NSError — Screen Time
+				// restrictions, no network, Game Center disabled in Settings — is
+				// not the player cancelling, and reporting it as CANCELLED (as this
+				// used to, unconditionally) hides a real failure behind a code the
+				// GDScript side treats as "not an error to show them".
+				int code = MS_GC_CANCELLED;
+				if (error != nil) {
+					NSString *description = error.localizedDescription.lowercaseString;
+					if ([description containsString:@"network"]) {
+						code = MS_GC_NETWORK;
+					} else if (![description containsString:@"cancel"]) {
+						code = MS_GC_UNSUPPORTED;
+					}
+				}
+				plugin->report_sign_in_failed(code,
 						error != nil ? ms_str(error.localizedDescription)
 									 : String("the player is not signed in to Game Center"));
 			}
@@ -200,6 +215,49 @@ void MobileServicesGameCenter::increment_achievement(const String &p_id, int p_s
 			updated.percentComplete = MIN(100.0, current + added);
 			updated.showsCompletionBanner = YES;
 			[GKAchievement reportAchievements:@[ updated ] withCompletionHandler:nil];
+		}];
+	}
+}
+
+/**
+ * Every achievement this player has made progress on.
+ *
+ * GAME CENTER HAS NO "FULL CATALOGUE" CALL the way Play Games does — this API
+ * only returns achievements the player has started, with no entry at all for
+ * one never touched, and no hidden/hidden-until-revealed distinction to report
+ * for what it does return. So every entry here is reported as "revealed" or
+ * "unlocked", never "hidden": that would be inventing a state this call does
+ * not actually tell us. A game wanting a fixed list of all possible
+ * achievements should keep its own catalogue and merge this progress into it.
+ */
+void MobileServicesGameCenter::load_achievements() {
+	@autoreleasepool {
+		[GKAchievement loadAchievementsWithCompletionHandler:^(NSArray<GKAchievement *> *achievements,
+				NSError *error) {
+			MobileServicesGameCenter *plugin = MobileServicesGameCenter::get_singleton();
+			if (!plugin) {
+				return;
+			}
+			if (error != nil) {
+				plugin->report_failed(String("load_achievements"), MS_GC_NETWORK,
+						ms_str(error.localizedDescription));
+				return;
+			}
+			NSMutableArray *list = [NSMutableArray arrayWithCapacity:achievements.count];
+			for (GKAchievement *achievement in achievements) {
+				[list addObject:@{
+					@"id" : achievement.identifier ?: @"",
+					@"state" : [achievement isCompleted] ? @"unlocked" : @"revealed",
+					// Game Center only has a percentage; the convention
+					// docs/play_games.md already asks games to follow — total
+					// steps of 100 — makes a step a percentage point on both
+					// platforms, so this needs no translation the caller has to
+					// know about.
+					@"current_steps" : @((int)round(achievement.percentComplete)),
+					@"total_steps" : @100,
+				}];
+			}
+			plugin->report_achievements_loaded(ms_json_from_array(list));
 		}];
 	}
 }
@@ -363,6 +421,10 @@ void MobileServicesGameCenter::report_sign_in_failed(int p_code, const String &p
 void MobileServicesGameCenter::report_failed(const String &p_operation, int p_code, const String &p_message) {
 	last_error = p_message;
 	MS_EMIT("play_games_failed", p_operation, p_code, p_message);
+}
+
+void MobileServicesGameCenter::report_achievements_loaded(const String &p_achievements_json) {
+	MS_EMIT("play_games_achievements_loaded", p_achievements_json);
 }
 
 void MobileServicesGameCenter::report_saved(const String &p_slot) {
