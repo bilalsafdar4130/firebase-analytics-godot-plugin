@@ -214,7 +214,21 @@ void MobileServicesGameCenter::increment_achievement(const String &p_id, int p_s
 			GKAchievement *updated = [[GKAchievement alloc] initWithIdentifier:identifier];
 			updated.percentComplete = MIN(100.0, current + added);
 			updated.showsCompletionBanner = YES;
-			[GKAchievement reportAchievements:@[ updated ] withCompletionHandler:nil];
+			[GKAchievement reportAchievements:@[ updated ]
+						withCompletionHandler:^(NSError *reportError) {
+							// Silently swallowed before: a game had no way to
+							// know the increment never reached Game Center.
+							// unlock_achievement() already reports this failure
+							// mode; increment should too.
+							if (reportError == nil) {
+								return;
+							}
+							MobileServicesGameCenter *inner = MobileServicesGameCenter::get_singleton();
+							if (inner) {
+								inner->report_failed(String("increment_achievement"), MS_GC_NETWORK,
+										ms_str(reportError.localizedDescription));
+							}
+						}];
 		}];
 	}
 }

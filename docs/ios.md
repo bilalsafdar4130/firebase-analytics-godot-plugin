@@ -26,7 +26,7 @@ SDK to link against instead, and no way to do it on Linux or Windows.
 
 ```bash
 brew install scons
-export GODOT_VERSION=4.4-stable        # match your export templates
+export GODOT_VERSION=4.6-stable        # match your export templates
 addons/mobile_services/tools/build_ios.sh release
 ```
 

@@ -50,7 +50,7 @@ command -v xcodebuild >/dev/null || { echo "error: Xcode is not installed" >&2; 
 ADDON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IOS_DIR="$ADDON_DIR/ios"
 GODOT_SOURCE="${GODOT_SOURCE_DIR:-$ADDON_DIR/.godot-source}"
-GODOT_VERSION="${GODOT_VERSION:-4.4-stable}"
+GODOT_VERSION="${GODOT_VERSION:-4.6-stable}"
 
 if [ ! -d "$GODOT_SOURCE" ]; then
 	echo "Cloning Godot $GODOT_VERSION into $GODOT_SOURCE (shallow)…"

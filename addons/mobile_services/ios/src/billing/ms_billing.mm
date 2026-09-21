@@ -13,6 +13,7 @@ static const int MS_BILLING_OK = 0;
 static const int MS_BILLING_USER_CANCELLED = 1;
 static const int MS_BILLING_UNAVAILABLE = 3;
 static const int MS_BILLING_ITEM_UNAVAILABLE = 4;
+static const int MS_BILLING_NOT_OWNED = 8;
 static const int MS_BILLING_NETWORK = 12;
 
 @interface MSStoreKitBridge : NSObject <SKProductsRequestDelegate, SKPaymentTransactionObserver>
@@ -49,6 +50,31 @@ static NSDictionary *ms_describe_product(SKProduct *product) {
 	};
 }
 
+/** Seconds in one subscription period. StoreKit 1 gives no calendar API here,
+ * so month/year use flat 30/365-day approximations — the same order of
+ * accuracy `ms_subscription_period_seconds`'s only caller needs. */
+static NSTimeInterval ms_subscription_period_seconds(SKProductSubscriptionPeriod *period) {
+	if (period == nil || period.numberOfUnits == 0) {
+		return 0;
+	}
+	NSTimeInterval unit_seconds = 0;
+	switch (period.unit) {
+		case SKProductPeriodUnitDay:
+			unit_seconds = 60.0 * 60.0 * 24.0;
+			break;
+		case SKProductPeriodUnitWeek:
+			unit_seconds = 60.0 * 60.0 * 24.0 * 7.0;
+			break;
+		case SKProductPeriodUnitMonth:
+			unit_seconds = 60.0 * 60.0 * 24.0 * 30.0;
+			break;
+		case SKProductPeriodUnitYear:
+			unit_seconds = 60.0 * 60.0 * 24.0 * 365.0;
+			break;
+	}
+	return unit_seconds * (NSTimeInterval)period.numberOfUnits;
+}
+
 static NSDictionary *ms_describe_transaction(SKPaymentTransaction *transaction) {
 	NSString *state = @"unspecified";
 	switch (transaction.transactionState) {
@@ -64,8 +90,32 @@ static NSDictionary *ms_describe_transaction(SKPaymentTransaction *transaction) 
 			break;
 	}
 	NSString *identifier = transaction.transactionIdentifier ?: @"";
+	NSString *productId = transaction.payment.productIdentifier ?: @"";
+
+	// MSIap.has_entitlement() on the GDScript side treats expires_at == 0 as
+	// "never expires". StoreKit 1 has no receipt-free way to ask whether a
+	// subscription is still active — unlike Play, whose queryPurchasesAsync
+	// simply stops returning a lapsed subscription — so leaving this at 0
+	// made every subscription permanent the moment it was ever bought once,
+	// even after the player cancelled and it lapsed. What IS real StoreKit
+	// data without a receipt is the product's own subscriptionPeriod, so the
+	// expiry is estimated from this transaction's date plus one period. That
+	// is an approximation, not a verified renewal date — a game that needs
+	// the exact one should verify the App Store receipt server-side and call
+	// grant_entitlement/revoke_entitlement itself (see docs/iap.md).
+	MSStoreKitBridge *bridge = [MSStoreKitBridge shared];
+	long long expiresAt = 0;
+	if ([bridge.types[productId] isEqualToString:@"subscription"]) {
+		SKProduct *product = bridge.products[productId];
+		NSTimeInterval periodSeconds = ms_subscription_period_seconds(product.subscriptionPeriod);
+		if (periodSeconds > 0) {
+			NSDate *base = transaction.transactionDate ?: [NSDate date];
+			expiresAt = (long long)(base.timeIntervalSince1970 + periodSeconds);
+		}
+	}
+
 	return @{
-		@"product_id" : transaction.payment.productIdentifier ?: @"",
+		@"product_id" : productId,
 		@"state" : state,
 		// StoreKit's transaction identifier stands in for Play's purchase token:
 		// it is what `finishTransaction` is keyed on here and what a server
@@ -84,6 +134,7 @@ static NSDictionary *ms_describe_transaction(SKPaymentTransaction *transaction) 
 		// unconditionally — this field only matters for the other two types.
 		@"acknowledged" : @NO,
 		@"auto_renewing" : @NO,
+		@"expires_at" : @(expiresAt),
 	};
 }
 
@@ -159,10 +210,22 @@ static NSDictionary *ms_describe_transaction(SKPaymentTransaction *transaction) 
 					self.unfinished[identifier] = transaction;
 				}
 				NSDictionary *described = ms_describe_transaction(transaction);
-				if (self.restoring) {
+				// A transaction restored while queryPurchases()'s
+				// restoreCompletedTransactions is in flight is reported ONCE,
+				// batched into purchases_queried below — never also through
+				// purchase_updated here. Both used to fire for it, which made
+				// MSIap._handle_purchase() run twice per restored purchase and,
+				// with it, consume()/acknowledge() get called a second time on
+				// a transaction the first call had already finished and
+				// forgotten. A transaction that arrives in the Restored state
+				// with no restore in flight (e.g. redelivered on a relaunch
+				// that interrupted a previous restore) still goes out here, so
+				// it is reported rather than silently dropped.
+				if (self.restoring && transaction.transactionState == SKPaymentTransactionStateRestored) {
 					[self.restored addObject:described];
+				} else {
+					plugin->report_purchase(ms_json_from_dictionary(described));
 				}
-				plugin->report_purchase(ms_json_from_dictionary(described));
 			} break;
 		}
 	}
@@ -305,6 +368,11 @@ void MobileServicesBilling::consume(const String &p_token) {
 		NSString *token = ms_ns(p_token);
 		SKPaymentTransaction *transaction = bridge.unfinished[token];
 		if (transaction == nil) {
+			// Not silent: a game (or MSIap, on a stale cache) that asks to
+			// consume a token this launch never saw would otherwise wait
+			// forever for a purchase_consumed that is never coming.
+			report_purchase_failed(String(), MS_BILLING_NOT_OWNED,
+					String("no unfinished transaction for this token; it may already be finished"));
 			return;
 		}
 		String product = ms_str(transaction.payment.productIdentifier);
@@ -320,6 +388,8 @@ void MobileServicesBilling::acknowledge(const String &p_token) {
 		NSString *token = ms_ns(p_token);
 		SKPaymentTransaction *transaction = bridge.unfinished[token];
 		if (transaction == nil) {
+			report_purchase_failed(String(), MS_BILLING_NOT_OWNED,
+					String("no unfinished transaction for this token; it may already be finished"));
 			return;
 		}
 		String product = ms_str(transaction.payment.productIdentifier);
