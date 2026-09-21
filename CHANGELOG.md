@@ -3,6 +3,74 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## 2.1.1
+
+CI was red on every run, and a second audit pass on top of 2.1.0's found
+more real bugs — some of them in code CI's own breakage had been hiding.
+
+### Fixed
+
+- **The Android CI workflow has failed on every run.** `android-actions/
+  setup-android@v3` defaults to installing the legacy `tools` SDK package,
+  which Google has removed from its repository entirely — `sdkmanager`
+  failed immediately, before the job built anything. Pinned the action's
+  `packages` input to `platform-tools`, which is all that step needs; the
+  real platform/build-tools are installed explicitly in the next step.
+- **`android/build.gradle.kts` still declared `minSdk = 21`**, left over
+  from when this repo targeted Godot 4.4.1. Godot 4.6's own template
+  requires `minSdk 24`. Fixed, along with every doc that quoted the old
+  number.
+- **`tools/build_ios.sh` defaulted `GODOT_VERSION` to `4.4-stable`**, so
+  following `docs/ios.md`'s own example would build the iOS native plugins
+  against a Godot source checkout that no longer matches the 4.6 toolchain
+  the rest of the repo targets. Moved the default and the doc example to
+  `4.6-stable`.
+- **iOS `show_banner()` ignored a changed banner position** on a banner
+  already on screen, contradicting the documented "idempotent, moves the
+  banner" contract — the same class of bug already fixed for Android in
+  2.1.0, just not carried over to iOS.
+- **iOS banners never fired `ad_shown` or `ad_clicked`.** `MSAdSlot`
+  declared `GADBannerViewDelegate` conformance but never implemented
+  `bannerViewDidRecordImpression:`/`bannerViewDidRecordClick:` — an
+  unimplemented optional protocol method is a silent no-op in Objective-C,
+  not a compile error, so this shipped and ran fine while quietly dropping
+  both signals for every banner.
+- **iOS Remote Config could return unreliable values.**
+  `remote_config_get_all()` called `-allKeysFromSource:` — which takes a
+  plain `NSInteger`, not an object — through `performSelector:withObject:`,
+  which can only ever pass an `id`. Boxing `0` as `@(0)` handed the method a
+  pointer where it expected a raw integer: undefined behaviour, not a
+  merely-wrong-but-safe value. Fixed with `NSInvocation`, the same pattern
+  this file already used correctly for `setCrashlyticsCollectionEnabled:`.
+- **iOS subscriptions never expired.** StoreKit 1 gives no receipt-free way
+  to ask whether a subscription is still active, and `expires_at` was left
+  at `0` — which `MSIap.has_entitlement()` treats as "never expires" — so a
+  subscription entitlement stayed granted forever even after the player
+  cancelled and it lapsed. Estimated now from the product's own
+  `subscriptionPeriod` plus the transaction date; server-side receipt
+  verification remains the exact answer for a game that needs one.
+- **iOS double-delivered a restored purchase.** A transaction restored
+  while `queryPurchases()` was in flight was reported once immediately via
+  `purchase_updated` and again batched into `purchases_queried`, running
+  the GDScript purchase handler — and `consume()`/`acknowledge()` — twice
+  for the same purchase on every restore, including the automatic one at
+  every launch.
+- **iOS `consume()`/`acknowledge()` on an unknown token silently did
+  nothing**, leaving the caller waiting on a signal that would never
+  arrive. Now reports `purchase_failed`, matching Android.
+- **iOS `increment_achievement()` swallowed Game Center failures** — its
+  completion handler was `nil`. Now reports the same way
+  `unlock_achievement()` already does.
+- **Android `purchase_consumed`/`purchase_acknowledged` always reported an
+  empty store id**, because Play's `consume`/`acknowledge` callbacks only
+  ever hand back a bare token. Now remembered per-token from every purchase
+  the plugin has seen.
+- **Two `BillingClientStateListener` callbacks could crash the app on an
+  uncaught exception** — `onBillingSetupFinished` and
+  `onBillingServiceDisconnected` were the only two SDK callbacks in the
+  Android billing bridge not wrapped in the file's own exception-safety
+  helper.
+
 ## 2.1.0
 
 Bug fixes found by an audit of every native module, plus one small addition
