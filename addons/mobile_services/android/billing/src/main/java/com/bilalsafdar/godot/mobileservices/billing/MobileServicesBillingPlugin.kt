@@ -82,6 +82,12 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	 * round trip and a price can be read back for an analytics event. */
 	private val details = HashMap<String, ProductDetails>()
 
+	/** Purchase token -> store id, learned from every purchase this plugin has
+	 * seen (a live update or a query), so [consume] and [acknowledge] — which
+	 * Play only gives a token to work with — can still report which product a
+	 * token belonged to on `purchase_consumed`/`purchase_acknowledged`. */
+	private val tokenStoreIds = HashMap<String, String>()
+
 	private var reconnectDelayMs = RECONNECT_BASE_MS
 	private var purchaseInFlight: String = ""
 
@@ -117,7 +123,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	private fun connect() {
 		val current = client ?: return
 		current.startConnection(object : BillingClientStateListener {
-			override fun onBillingSetupFinished(result: BillingResult) {
+			override fun onBillingSetupFinished(result: BillingResult) = safely("onBillingSetupFinished") {
 				if (result.responseCode == BillingClient.BillingResponseCode.OK) {
 					reconnectDelayMs = RECONNECT_BASE_MS
 					clearFailure()
@@ -128,7 +134,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 				}
 			}
 
-			override fun onBillingServiceDisconnected() {
+			override fun onBillingServiceDisconnected() = safely("onBillingServiceDisconnected") {
 				// Not an error to report to the game: Play updating itself
 				// disconnects every bound client on the device. Reconnect
 				// quietly, and only tell the game if it never comes back.
@@ -177,10 +183,16 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 			}
 			current.queryProductDetailsAsync(
 				QueryProductDetailsParams.newBuilder().setProductList(products).build()
-			) { result, list ->
+			) { result, queryResult ->
 				safely("queryProducts($type)") {
 					if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-						for (item in list) {
+						// Billing 7 wraps the answer in QueryProductDetailsResult
+						// (fetched + unfetched, so a bad id can be told apart from a
+						// network failure); the 6.x listener handed back the bare
+						// List<ProductDetails> this used to iterate directly, which
+						// does not even compile against 7.1.1 — QueryProductDetailsResult
+						// is not itself a List.
+						for (item in queryResult.productDetailsList) {
 							details[item.productId] = item
 							collected.add(describe(item))
 						}
@@ -364,7 +376,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		) { result, token ->
 			safely("consume") {
 				if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-					signal("purchase_consumed", token, "")
+					signal("purchase_consumed", token, tokenStoreIds[token] ?: "")
 				} else {
 					// Worth reporting: an unconsumed consumable cannot be bought
 					// again, and the player's next attempt fails with a message
@@ -386,7 +398,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		) { result ->
 			safely("acknowledge") {
 				if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-					signal("purchase_acknowledged", purchaseToken, "")
+					signal("purchase_acknowledged", purchaseToken, tokenStoreIds[purchaseToken] ?: "")
 				} else {
 					// The expensive one: Play refunds an unacknowledged purchase
 					// after three days, and the player keeps whatever the game
@@ -413,8 +425,12 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 			Purchase.PurchaseState.PENDING -> "pending"
 			else -> "unspecified"
 		}
+		val storeId = purchase.products.firstOrNull().orEmpty()
+		if (storeId.isNotEmpty()) {
+			tokenStoreIds[purchase.purchaseToken] = storeId
+		}
 		return Json.string(
-			"product_id" to purchase.products.firstOrNull().orEmpty(),
+			"product_id" to storeId,
 			"state" to state,
 			"token" to purchase.purchaseToken,
 			"order_id" to (purchase.orderId ?: ""),
