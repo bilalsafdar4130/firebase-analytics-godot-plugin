@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Godot | 4.3 – 4.6. Developed and built in CI against **4.6**. |
-| Android | minSdk **21**, compileSdk **35**, targetSdk whatever your export preset sets (Play requires 34+) |
+| Android | minSdk **24**, compileSdk **35**, targetSdk whatever your export preset sets (Play requires 34+) |
 | Android ABIs | `arm64-v8a` (required), `armeabi-v7a` (works). `x86_64` only for emulators. |
 | iOS | **14.0**+, arm64. The floor is set by `AppTrackingTransparency`. |
 | JDK | **17** |
@@ -48,7 +48,7 @@ actually broke a build:
 **On a Godot upgrade:** read that `config.gradle` at the new tag and move
 `android/build.gradle.kts` to match. That is the whole procedure.
 
-**minSdk 21** is the engine's floor, and this addon does not raise it. The ad and
+**minSdk 24** is the engine's floor, and this addon does not raise it. The ad and
 billing SDKs have higher floors of their own, but they are dependencies of the
 **app**, so a game that enables them raises the Min SDK in its own export preset
 — and this number never has to move.

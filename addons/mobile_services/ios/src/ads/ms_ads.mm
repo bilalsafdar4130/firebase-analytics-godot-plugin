@@ -24,6 +24,8 @@ MobileServicesAds *MobileServicesAds::instance = nullptr;
 @property(nonatomic, strong) id fullScreenAd;
 @property(nonatomic, strong) GADBannerView *bannerView;
 @property(nonatomic, strong) UIView *bannerContainer;
+@property(nonatomic, copy) NSString *bannerPosition;
+@property(nonatomic, strong) NSArray<NSLayoutConstraint *> *bannerConstraints;
 @end
 
 static NSMutableDictionary<NSString *, MSAdSlot *> *ms_slots() {
@@ -218,6 +220,26 @@ static MSAdSlot *ms_slot(NSString *placement, NSString *format, NSString *unitID
 	return slot;
 }
 
+/** Pins (or re-pins) a banner to the top or bottom of the safe area, tearing
+ * down whatever constraints it had before. Used both the first time a banner
+ * is shown and when show_banner() is called again with a different position
+ * on one already on screen. */
+static void ms_apply_banner_position(MSAdSlot *slot, UIViewController *controller, NSString *position) {
+	if (slot.bannerConstraints != nil) {
+		[NSLayoutConstraint deactivateConstraints:slot.bannerConstraints];
+	}
+	GADBannerView *banner = slot.bannerView;
+	UILayoutGuide *safe = controller.view.safeAreaLayoutGuide;
+	NSLayoutConstraint *vertical = [position isEqualToString:@"top"]
+			? [banner.topAnchor constraintEqualToAnchor:safe.topAnchor]
+			: [banner.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor];
+	NSLayoutConstraint *horizontal = [banner.centerXAnchor constraintEqualToAnchor:safe.centerXAnchor];
+	NSArray<NSLayoutConstraint *> *constraints = @[ vertical, horizontal ];
+	[NSLayoutConstraint activateConstraints:constraints];
+	slot.bannerConstraints = constraints;
+	slot.bannerPosition = position;
+}
+
 void MobileServicesAds::load_ad(const String &p_placement, const String &p_format, const String &p_unit_id) {
 	@autoreleasepool {
 		NSString *placement = ms_ns(p_placement);
@@ -375,8 +397,18 @@ void MobileServicesAds::show_banner(const String &p_placement, const String &p_u
 	@autoreleasepool {
 		NSString *placement = ms_ns(p_placement);
 		MSAdSlot *slot = ms_slot(placement, @"banner", ms_ns(p_unit_id));
+		NSString *position = (p_position == String("top")) ? @"top" : @"bottom";
 		if (slot.bannerView != nil) {
 			slot.bannerContainer.hidden = NO;
+			// Idempotent, but "move it if the position changed" is part of the
+			// contract (see ms_ads.gd, show_banner): a banner already on screen
+			// must actually move rather than silently keep its old constraints.
+			if (![position isEqualToString:slot.bannerPosition]) {
+				UIViewController *controller = ms_root_controller();
+				if (controller != nil) {
+					ms_apply_banner_position(slot, controller, position);
+				}
+			}
 			return;
 		}
 		UIViewController *controller = ms_root_controller();
@@ -403,19 +435,12 @@ void MobileServicesAds::show_banner(const String &p_placement, const String &p_u
 		};
 		banner.translatesAutoresizingMaskIntoConstraints = NO;
 		[controller.view addSubview:banner];
+		slot.bannerView = banner;
+		slot.bannerContainer = banner;
 		// Pinned to the SAFE AREA, not the view: a bottom banner pinned to the
 		// view sits under the home indicator on every modern iPhone and eats the
 		// taps meant for it.
-		UILayoutGuide *safe = controller.view.safeAreaLayoutGuide;
-		NSLayoutConstraint *vertical = (p_position == String("top"))
-				? [banner.topAnchor constraintEqualToAnchor:safe.topAnchor]
-				: [banner.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor];
-		[NSLayoutConstraint activateConstraints:@[
-			vertical,
-			[banner.centerXAnchor constraintEqualToAnchor:safe.centerXAnchor],
-		]];
-		slot.bannerView = banner;
-		slot.bannerContainer = banner;
+		ms_apply_banner_position(slot, controller, position);
 		[banner loadRequest:[GADRequest request]];
 	}
 }
