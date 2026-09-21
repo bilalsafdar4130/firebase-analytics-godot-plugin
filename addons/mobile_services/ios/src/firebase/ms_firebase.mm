@@ -355,7 +355,25 @@ String MobileServicesFirebase::remote_config_get_all() {
 		}
 		// Source 0 is FIRRemoteConfigSourceRemote; the GDScript side merges the
 		// game's own defaults over the top, so only fetched values travel.
-		NSArray *keys = [config performSelector:all_keys withObject:@(0)];
+		//
+		// -allKeysFromSource: takes a plain NSInteger, not an object, so it
+		// cannot go through performSelector:withObject: the way
+		// -configValueForKey: below does: withObject: only ever passes an id,
+		// and boxing 0 as @(0) here handed the callee a pointer to an NSNumber
+		// where it expected the integer 0 in that same register — an
+		// effectively random FIRRemoteConfigSource on every call, and with it
+		// an empty (or worse, undefined) key list. NSInvocation is the only
+		// dynamic-dispatch route that can pass a real primitive.
+		NSMethodSignature *all_keys_signature = [config methodSignatureForSelector:all_keys];
+		NSInvocation *all_keys_call = [NSInvocation invocationWithMethodSignature:all_keys_signature];
+		[all_keys_call setSelector:all_keys];
+		[all_keys_call setTarget:config];
+		NSInteger source = 0;
+		[all_keys_call setArgument:&source atIndex:2];
+		[all_keys_call invoke];
+		__unsafe_unretained NSArray *unretained_keys = nil;
+		[all_keys_call getReturnValue:&unretained_keys];
+		NSArray *keys = unretained_keys;
 		NSMutableDictionary *values = [NSMutableDictionary dictionary];
 		for (NSString *key in keys) {
 			id value = [config performSelector:@selector(configValueForKey:) withObject:key];

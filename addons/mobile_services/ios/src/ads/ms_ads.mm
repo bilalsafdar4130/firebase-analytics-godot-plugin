@@ -108,6 +108,25 @@ static UIViewController *ms_root_controller() {
 	}
 }
 
+/** The full-screen formats report an impression/click through
+ * GADFullScreenContentDelegate above; a banner is its own view and reports
+ * through this delegate instead, so it needs the same two wired here or a
+ * banner placement never fires ad_shown/ad_clicked at all (the Android
+ * provider's AdListener wires both for its banners). */
+- (void)bannerViewDidRecordImpression:(nonnull GADBannerView *)bannerView {
+	MobileServicesAds *plugin = MobileServicesAds::get_singleton();
+	if (plugin) {
+		plugin->report_shown(ms_str(self.placement), ms_str(self.format));
+	}
+}
+
+- (void)bannerViewDidRecordClick:(nonnull GADBannerView *)bannerView {
+	MobileServicesAds *plugin = MobileServicesAds::get_singleton();
+	if (plugin) {
+		plugin->report_clicked(ms_str(self.placement), ms_str(self.format));
+	}
+}
+
 /** AdMob's per-impression revenue, in the shape Firebase's ad-revenue reports
  * expect. See the Android provider for what `precision` means and why it
  * travels with the figure. */
