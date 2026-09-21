@@ -183,16 +183,10 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 			}
 			current.queryProductDetailsAsync(
 				QueryProductDetailsParams.newBuilder().setProductList(products).build()
-			) { result, queryResult ->
+			) { result, list ->
 				safely("queryProducts($type)") {
 					if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-						// Billing 7 wraps the answer in QueryProductDetailsResult
-						// (fetched + unfetched, so a bad id can be told apart from a
-						// network failure); the 6.x listener handed back the bare
-						// List<ProductDetails> this used to iterate directly, which
-						// does not even compile against 7.1.1 — QueryProductDetailsResult
-						// is not itself a List.
-						for (item in queryResult.productDetailsList) {
+						for (item in list) {
 							details[item.productId] = item
 							collected.add(describe(item))
 						}
