@@ -64,7 +64,7 @@ Added to the app by the export plugin, only for the modules a game enables.
 | Firebase Remote Config | `com.google.firebase:firebase-config:22.0.1` | `FirebaseRemoteConfig` |
 | Google Mobile Ads | `com.google.android.gms:play-services-ads:23.6.0` | `Google-Mobile-Ads-SDK` |
 | AppLovin MAX | `com.applovin:applovin-sdk:13.0.1` | *(not implemented — see [`ios.md`](ios.md))* |
-| Play Billing / StoreKit | `com.android.billingclient:billing-ktx:7.1.1` | StoreKit (system) |
+| Play Billing / StoreKit | `com.android.billingclient:billing-ktx:8.0.0` | StoreKit (system) |
 | Play Games / Game Center | `com.google.android.gms:play-services-games-v2:20.1.2` | GameKit (system) |
 | UMP consent | `com.google.android.ump:user-messaging-platform:3.1.0` | `GoogleUserMessagingPlatform` |
 

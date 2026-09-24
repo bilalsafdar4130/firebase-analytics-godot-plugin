@@ -55,7 +55,7 @@ const DEPENDENCIES := {
 	"firebase_remote_config": "com.google.firebase:firebase-config:22.0.1",
 	"admob": "com.google.android.gms:play-services-ads:23.6.0",
 	"applovin": "com.applovin:applovin-sdk:13.0.1",
-	"billing": "com.android.billingclient:billing-ktx:7.1.1",
+	"billing": "com.android.billingclient:billing-ktx:8.0.0",
 	"play_games": "com.google.android.gms:play-services-games-v2:20.1.2",
 	"ump": "com.google.android.ump:user-messaging-platform:3.1.0",
 }

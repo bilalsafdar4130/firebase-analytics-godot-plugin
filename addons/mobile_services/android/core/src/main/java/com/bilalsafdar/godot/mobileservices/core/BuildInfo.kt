@@ -9,5 +9,5 @@ package com.bilalsafdar.godot.mobileservices.core
  * from another, which is the failure `MSNative` reports as a missing method.
  */
 object BuildInfo {
-	const val VERSION = "2.1.1"
+	const val VERSION = "2.1.2"
 }
