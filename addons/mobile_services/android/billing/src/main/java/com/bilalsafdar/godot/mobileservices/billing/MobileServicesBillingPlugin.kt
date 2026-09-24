@@ -109,7 +109,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		val activity = getActivity() ?: return@onUi
 		client = BillingClient.newBuilder(activity)
 			.setListener { result, purchases -> onPurchasesUpdated(result, purchases) }
-			// Mandatory in Billing 7. Both flavours, because a game with a
+			// Mandatory since Billing 7. Both flavours, because a game with a
 			// subscription and a coin pack has both kinds of pending purchase.
 			.enablePendingPurchases(
 				PendingPurchasesParams.newBuilder()
@@ -181,12 +181,16 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 					.setProductType(type)
 					.build()
 			}
+			// Billing 8: the listener receives a QueryProductDetailsResult, not a
+			// bare list. Products Play could not return (unknown id, not active
+			// in the Console) are in `unfetchedProductList` and are simply absent
+			// from the catalogue, exactly as they were under Billing 7.
 			current.queryProductDetailsAsync(
 				QueryProductDetailsParams.newBuilder().setProductList(products).build()
-			) { result, list ->
+			) { result, queried ->
 				safely("queryProducts($type)") {
 					if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-						for (item in list) {
+						for (item in queried.productDetailsList) {
 							details[item.productId] = item
 							collected.add(describe(item))
 						}

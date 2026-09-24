@@ -3,6 +3,21 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## 2.1.2
+
+### Fixed
+
+- **Google Play rejects every release that carries IAP.** Play now refuses
+  bundles built with Play Billing Library 7 ("Artifact … uses Play Billing
+  Library version 7.1.1 and must update to at least version 8.0.0") — the
+  publish step of SparkLogic's release pipeline failed on it. `billing-ktx` is
+  now `8.0.0`, in both places it is declared (`android/billing/build.gradle.kts`
+  and `editor/android_export_plugin.gd`).
+- The one API Billing 8 changed that the bridge uses:
+  `queryProductDetailsAsync` now hands the listener a `QueryProductDetailsResult`
+  instead of a bare list. The bridge reads `productDetailsList` from it; the
+  catalogue it signals to GDScript is unchanged, so games need no code change.
+
 ## 2.1.1
 
 CI was red on every run, and a second audit pass on top of 2.1.0's found

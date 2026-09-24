@@ -20,5 +20,5 @@ android {
 
 dependencies {
 	compileOnly(project(":core"))
-	compileOnly("com.android.billingclient:billing-ktx:7.1.1")
+	compileOnly("com.android.billingclient:billing-ktx:8.0.0")
 }
