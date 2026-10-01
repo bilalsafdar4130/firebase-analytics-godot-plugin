@@ -172,8 +172,14 @@ jobs:
             done
           done
 
+      # ONLY FOR A RELEASE. release.yml calls this workflow on a tag and needs
+      # the AARs handed over; an ordinary push or pull request proves the build
+      # and keeps nothing, because Actions storage on this account is full and
+      # every game builds these AARs from source anyway.
       - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           name: android-aars
           path: addons/mobile_services/bin/android/
           if-no-files-found: error
+          retention-days: 1

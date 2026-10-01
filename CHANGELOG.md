@@ -3,6 +3,27 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## 2.1.3
+
+### Fixed
+
+- **Every native call on Android was dropped: no Firebase events, no ads, no
+  purchases, no consent.** `MSNative.call_method` asked `Object.has_method`
+  whether the plugin had a method before calling it. An Android plugin reaches
+  GDScript as a `JNISingleton`, whose `@UsedByGodot` methods live in its JNI
+  method map, and `Object.has_method` (not virtual) only looks at ClassDB, an
+  attached script and `free`. So it answered false for `initializeFirebase`,
+  `logEvent`, `setConsent`, `initializeAds`, `loadAd`, `initializeBilling`,
+  `purchase`, `requestConsentUpdate` and every other method, and each one
+  returned its fallback with a "missing from the installed native plugin"
+  warning. The AABs were complete the whole time, which is why CI's artifact
+  checks stayed green. The bridge now asks through `MSNative.answers()`:
+  `has_method` first (iOS and GDScript objects), then the engine's own
+  `has_java_method` (Android).
+- `tests/test_native.gd` drives that decision with a double shaped the way the
+  engine hands an Android plugin over, which is the case no desktop run can
+  reach.
+
 ## 2.1.2
 
 ### Fixed
