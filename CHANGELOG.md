@@ -3,6 +3,53 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## 2.2.0
+
+The billing side brought up to date for the games' stores going live.
+
+### Changed
+
+- **Play Billing Library 9.1.0** (was 8.0.0), the current release. The plain
+  `billing` artifact replaces `billing-ktx` in both places it is declared
+  (`android/billing/build.gradle.kts` and `editor/android_export_plugin.gd`):
+  the bridge uses no Kotlin extension, and `-ktx` added kotlinx-coroutines to
+  every APK and a Kotlin stdlib newer than the engine's pinned compiler to the
+  bridge's classpath. Billing 9 requires `targetSdk` 35+; every game sets 36.
+
+### Added
+
+- **Why a product is not on sale.** Billing 8+ reports, per product, why Play
+  could not return it. The bridge now forwards that (`products_unfetched`), and
+  `MSIap` logs a warning naming the product and what to check, emits
+  `products_unavailable(products)`, answers `get_unavailable_products()`, and
+  lists them in the diagnostics dump. A mistyped id or an inactive product used
+  to be a BUY button that silently never appeared.
+- **One-time products with several purchase options** (Billing 8's new model,
+  which is what the Play Console creates now). When no option is marked
+  backwards compatible, `oneTimePurchaseOfferDetails` is null and the product
+  showed no price; the bridge falls back to the first listed offer and buys
+  exactly that one. An `offer_token` passed to `purchase()` is honoured for
+  one-time products too.
+- **Billing 8's sub-response codes** lead the `purchase_failed` message:
+  "payment declined: insufficient funds", "this account is not eligible for the
+  offer".
+
+### Fixed
+
+- **`ITEM_ALREADY_OWNED` left the player stuck.** A consumable whose consume
+  never reached Play (a dropped connection, the app killed in between) cannot
+  be bought again, and every retry failed the same way. The refusal is still
+  reported, and the SDK now also re-reads what the account owns, which delivers
+  and consumes the stuck purchase. Same for a one-time product bought before a
+  reinstall and not yet restored.
+
+### Tests
+
+- `tests/test_iap.gd` drives `MSIap` with a double shaped like the Android
+  bridge: unavailable products, a later query clearing them, the
+  already-owned restore, a cancel, and a consumable re-reported with the same
+  token. `MSConfig.platform_override` lets those run on the Linux CI runner.
+
 ## 2.1.4
 
 ### Fixed

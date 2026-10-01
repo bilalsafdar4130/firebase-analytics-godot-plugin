@@ -102,6 +102,18 @@ uploaded release, or is not installed from a Play track.** A debug APK sideloade
 from your machine reports every product as unknown. Upload to internal testing
 and install from there.
 
+**Ask the SDK first.** Since 2.2.0, Play Billing tells the SDK *per product*
+why it could not return one, and the SDK passes that on: a warning in the log
+(`the store will not sell coins_500 (product_not_found): …`),
+`MobileServices.iap.get_unavailable_products()`, and a `products_unavailable`
+line in `get_diagnostics_text()`.
+
+| Reason | Means |
+|---|---|
+| `product_not_found` | No **active** product with that id in this app's Play Console, or the build is not from a Play track |
+| `invalid_product_id` | The id is not a legal Play product id — check `mobile_services.cfg` |
+| `no_eligible_offer` | The product exists but has no purchase option or offer this account may buy (country availability, eligibility rules) |
+
 Then check, in order:
 
 - the ids in `mobile_services.cfg` match the Play Console exactly (case included)
@@ -164,7 +176,7 @@ Play Games reports all of these the same way, and the detail only in logcat.
 Two copies of the same SDK. Most likely another Godot addon is adding a Firebase
 or ads dependency as well. Check every addon's `_get_android_dependencies`, and
 remove `ads/extra_android_dependencies` entries that duplicate what this SDK
-already adds (`play-services-ads`, `firebase-analytics`, `billing-ktx`,
+already adds (`play-services-ads`, `firebase-analytics`, `billing`,
 `play-services-games-v2`, `user-messaging-platform`).
 
 ## Gradle: "the plugin has not been built"

@@ -41,6 +41,12 @@ signal iap_failed(error: Dictionary)
 ## from.
 signal products_loaded(products: Dictionary)
 signal products_load_failed(error: Dictionary)
+## Products in mobile_services.cfg that the store would not sell, keyed by
+## logical name, each with the store's reason: `product_not_found` (no such id
+## in the Play Console, or not active), `invalid_product_id`,
+## `no_eligible_offer`, or `unknown`. Arrives just before [signal
+## products_loaded]. Android only: Play Billing 8+ is what says why.
+signal products_unavailable(products: Dictionary)
 
 signal purchase_started(product: String)
 ## The purchase is real and paid for. Grant here, once.
@@ -57,6 +63,9 @@ signal entitlements_changed(entitlements: Array)
 
 ## logical name -> store metadata (price, title, description, currency, offers)
 var _catalogue := {}
+## logical name -> why the store did not return it. See
+## [signal products_unavailable].
+var _unavailable := {}
 ## entitlement -> {"product", "expires_at"} — expires_at 0 for a permanent one.
 var _entitlements := {}
 ## Store ids of purchases already delivered, so a restore does not re-grant a
@@ -81,6 +90,11 @@ func setup() -> void:
 		"purchases_queried", "purchase_consumed", "purchase_acknowledged",
 	]:
 		native.connect_signal(signal_name, Callable(self, "_on_native_" + signal_name))
+	# Optional: only the Android bridge from 2.2.0 declares it, and an iOS or an
+	# older plugin without it is not something to warn about.
+	var plugin := native.get_object()
+	if plugin != null and plugin.has_signal("products_unfetched"):
+		native.connect_signal("products_unfetched", _on_native_products_unfetched)
 	native.call_method("initializeBilling", [JSON.stringify(_product_manifest())])
 
 
@@ -219,6 +233,13 @@ func get_catalogue() -> Dictionary:
 	return _catalogue.duplicate(true)
 
 
+## Products the store refused to return, with its reason for each — the answer
+## to "why does this BUY button never appear". Empty when everything is on sale,
+## and always empty on iOS. See [signal products_unavailable].
+func get_unavailable_products() -> Dictionary:
+	return _unavailable.duplicate()
+
+
 ## Grants an entitlement without a purchase.
 ##
 ## For a server that has verified a receipt, for a promo code redeemed outside
@@ -275,8 +296,47 @@ func _on_native_products_loaded(products_json: String) -> void:
 		info["product"] = product["name"]
 		info["type"] = product["type"]
 		_catalogue[str(product["name"])] = info
+		# A product that is on sale now is not unavailable, whatever an earlier
+		# query said — a refresh that fetches everything sends no unfetched list.
+		_unavailable.erase(str(product["name"]))
 	log.info(service_name, "%d product(s) priced by the store" % _catalogue.size())
 	products_loaded.emit(get_catalogue())
+
+
+## Billing 8+ names every product Play would not return, and why. Each one is a
+## BUY button that will never appear, so each one is a warning: in a release
+## build this is the only place a mistyped product id or a product left
+## inactive in the Play Console says so.
+func _on_native_products_unfetched(products_json: String) -> void:
+	_unavailable.clear()
+	for entry in parse_array(products_json):
+		if not (entry is Dictionary):
+			continue
+		var store_id := str(entry.get("id", ""))
+		var product := config.get_product_by_store_id(store_id)
+		var name := str(product.get("name", store_id))
+		var reason := str(entry.get("reason", "unknown"))
+		_unavailable[name] = reason
+		log.warn(service_name, (
+			"the store will not sell %s (%s): %s"
+			% [name, reason, unavailable_hint(reason)]
+		))
+	products_unavailable.emit(get_unavailable_products())
+
+
+## What to check in the store console for each reason the store gives.
+static func unavailable_hint(reason: String) -> String:
+	match reason:
+		"product_not_found":
+			return (
+				"no ACTIVE product has this id in the Play Console, or this build "
+				+ "is not installed from a Play track"
+			)
+		"invalid_product_id":
+			return "the id is not a valid Play product id; check mobile_services.cfg"
+		"no_eligible_offer":
+			return "the product exists but has no offer this account may buy"
+	return "the store gave no reason"
 
 
 func _on_native_products_load_failed(code: int, message: String) -> void:
@@ -367,6 +427,15 @@ func _on_native_purchase_failed(store_id: String, code: int, message: String) ->
 		return
 	var error := record(MSError.make(translated, message, service_name, code))
 	purchase_failed.emit(name, error)
+	if translated == MSError.ALREADY_OWNED and is_ready():
+		# THE STORE SAYS THEY ALREADY PAID FOR IT, so whatever this device
+		# believes is out of date: a consumable whose consume never landed (it
+		# can never be bought again until it does), or a one-time product bought
+		# before a reinstall and not restored yet. Re-reading what the account
+		# owns delivers it through `purchase_completed` and finishes it with the
+		# store, which is what the player was trying to get.
+		log.info(service_name, "%s is already owned; restoring purchases" % name)
+		restore_purchases()
 
 
 func _on_native_purchases_queried(purchases_json: String) -> void:
@@ -466,6 +535,11 @@ func diagnostics() -> Dictionary:
 	var report := super.diagnostics()
 	report["products_configured"] = config.products.size() if config != null else 0
 	report["products_priced"] = _catalogue.size()
+	var unavailable := []
+	for name in _unavailable:
+		unavailable.append("%s: %s" % [name, _unavailable[name]])
+	unavailable.sort()
+	report["products_unavailable"] = unavailable
 	report["entitlements"] = get_entitlements()
 	report["purchase_in_flight"] = _purchase_in_flight
 	return report

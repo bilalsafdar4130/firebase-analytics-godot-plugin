@@ -52,7 +52,7 @@ enum State {
 	FAILED,
 }
 
-const VERSION := "2.1.4"
+const VERSION := "2.2.0"
 
 ## Where each service's native half lives. Six plugins rather than one, so a
 ## game that wants analytics and nothing else ships neither the ad SDK nor the

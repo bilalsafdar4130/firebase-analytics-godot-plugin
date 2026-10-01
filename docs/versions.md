@@ -67,7 +67,7 @@ Added to the app by the export plugin, only for the modules a game enables.
 | Firebase Remote Config | `com.google.firebase:firebase-config:22.0.1` | `FirebaseRemoteConfig` |
 | Google Mobile Ads | `com.google.android.gms:play-services-ads:23.6.0` | `Google-Mobile-Ads-SDK` |
 | AppLovin MAX | `com.applovin:applovin-sdk:13.0.1` | *(not implemented — see [`ios.md`](ios.md))* |
-| Play Billing / StoreKit | `com.android.billingclient:billing-ktx:8.0.0` | StoreKit (system) |
+| Play Billing / StoreKit | `com.android.billingclient:billing:9.1.0` | StoreKit (system) |
 | Play Games / Game Center | `com.google.android.gms:play-services-games-v2:20.1.2` | GameKit (system) |
 | UMP consent | `com.google.android.ump:user-messaging-platform:3.1.0` | `GoogleUserMessagingPlatform` |
 
@@ -84,6 +84,14 @@ failed the *game's* export rather than this addon's build.
 but the dependency versions above have deliberately NOT been raised with it. They
 work, and a dependency bump is its own change with its own testing — not a rider
 on a toolchain fix. These move when somebody moves them on purpose.
+
+**Play Billing was moved on purpose, in 2.2.0**, to 9.1.0 (8.0.0 before it): the
+games were about to open their stores, and Play sets a floor on this one library
+— bundles below Billing 8 have been refused since 31 August 2026. 9.x needs
+`targetSdk` 35+, which every game's export preset already exceeds (36). It is
+the plain `billing` artifact rather than `billing-ktx`: the bridge calls no
+Kotlin extension, and `-ktx` would add kotlinx-coroutines to every APK and put a
+Kotlin stdlib newer than the engine's 2.1.21 compiler on the bridge's classpath.
 
 ### Bumping one
 

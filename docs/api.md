@@ -120,11 +120,13 @@ Placements are named in `mobile_services.cfg`. Game code never sees a unit id.
 | `get_entitlements() -> Array` | |
 | `get_product_info(product) -> Dictionary` | `price` (the store's own localised string — show this, never build your own), `price_micros`, `currency`, `title`, `description`, `offers`. |
 | `get_catalogue() -> Dictionary` | |
+| `get_unavailable_products() -> Dictionary` | Products Play would not return, each with Play's reason (`product_not_found`, `invalid_product_id`, `no_eligible_offer`, `unknown`). Android only. |
 | `grant_entitlement(name, product := "", expires_at := 0)` | For a server that verified a receipt, a promo code, or testing. |
 | `revoke_entitlement(name)` | |
 
 **Signals:** `iap_ready()`, `iap_failed(error)`, `products_loaded(products)`,
-`products_load_failed(error)`, `purchase_started(product)`,
+`products_load_failed(error)`, `products_unavailable(products)`,
+`purchase_started(product)`,
 **`purchase_completed(purchase)`** — grant here, once —
 `purchase_pending(purchase)`, `purchase_failed(product, error)`,
 `purchase_cancelled(product)`, `purchases_restored(products)`,
