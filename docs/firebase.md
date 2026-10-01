@@ -76,7 +76,7 @@ With the defaults, the SDK also sends:
 
 | Event | When | Switch |
 |---|---|---|
-| `ad_impression` | every ad impression, with revenue | `analytics/auto_ad_events` |
+| `ad_impression` | every ad impression, with revenue — for AdMob only when `analytics/admob_linked_to_firebase = false`, because a linked AdMob app logs it itself | `analytics/auto_ad_events` |
 | `rewarded_ad_completed` | a reward is earned | `analytics/auto_ad_events` |
 | `purchase` | a purchase completes | `analytics/auto_iap_events` |
 | `purchase_failed` | a purchase fails | `analytics/auto_iap_events` |

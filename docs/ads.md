@@ -144,9 +144,12 @@ MobileServices.ads.ad_impression.connect(func(placement, info):
 )
 ```
 
-With `analytics/auto_ad_events = true` this is already being sent to Firebase as
+With `analytics/auto_ad_events = true` this is already reaching Firebase as
 `ad_impression` with the parameter names Google's ad-revenue reports look for, so
-most games do not connect it at all.
+most games do not connect it at all. For AdMob it is AdMob that sends it, once the
+AdMob app is linked to the Firebase project (`analytics/admob_linked_to_firebase`,
+default `true`); the SDK sends it itself for every other network, AppLovin MAX
+included, so nothing is counted twice.
 
 `precision` says how much to trust the figure — on AdMob: 0 unknown, 1 estimated,
 2 the publisher's floor, 3 the exact amount paid. Keep it alongside the number;

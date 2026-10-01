@@ -48,6 +48,9 @@ func _exit_tree() -> void:
 ## enabled, rather than leaving it to be discovered at export time or, worse,
 ## after a release.
 func _report_configuration() -> void:
+	var mismatch := MobileServicesEditorConfig.engine_mismatch()
+	if not mismatch.is_empty():
+		push_warning("[MobileServices] %s" % mismatch)
 	var path := str(ProjectSettings.get_setting(
 		MobileServicesEditorConfig.SETTING_CONFIG_PATH, MSConfig.DEFAULT_PATH
 	))

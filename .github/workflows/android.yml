@@ -54,16 +54,16 @@ env:
   # toolchain in android/build.gradle.kts is copied from THIS version's
   # config.gradle — see docs/versions.md before changing either.
   #
-  # 4.6, because that is what Blaze Assembly and SparkLogic export with — and it
-  # is not only the engine library that comes from the template. The GRADLE
-  # WRAPPER does too, and android/build.gradle.kts needs AGP 8.6.1, which
-  # requires Gradle 8.7+. 4.4.1's template ships Gradle 8.2 and would refuse to
-  # run it; 4.6's ships 8.11.1. The two move together or neither does.
-  #
-  # Kotlin is the half that bites hardest: 4.6's godot-lib carries Kotlin 2.1.0
-  # metadata, and a 1.9.x compiler cannot read it at all — every module fails,
-  # with an error naming the engine rather than this repository.
-  GODOT_VERSION: "4.6"
+  # 4.7.2, the ONE engine version every game in this studio exports with
+  # (SparkLogic, Blaze Assembly, Vertex Racer, Pipeline Pioneers, Pitch
+  # Alchemy). It is not only the engine library that comes from the template:
+  # the GRADLE WRAPPER does too (8.11.1, which AGP 8.6.1 needs), and Kotlin is
+  # the half that bites hardest -- a compiler older than the metadata in the
+  # template's godot-lib cannot read it at all, and every module fails with an
+  # error naming the engine rather than this repository. The two move together
+  # or neither does. MobileServicesEditorConfig.GODOT_VERSION must say the same;
+  # tests/test_versions.gd checks that it does.
+  GODOT_VERSION: "4.7.2"
   GODOT_RELEASE: "stable"
 
 jobs:
@@ -105,8 +105,8 @@ jobs:
         # an explicit install turns "the build failed on a fresh runner" into a
         # step with a name.
         run: |
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" > /dev/null
-          sdkmanager --list_installed | grep -E 'platforms;android-34|build-tools;34'
+          sdkmanager --install "platforms;android-36" "build-tools;36.1.0" > /dev/null
+          sdkmanager --list_installed | grep -E 'platforms;android-36|build-tools;36'
 
       - name: Restore the Godot Android build template
         id: template

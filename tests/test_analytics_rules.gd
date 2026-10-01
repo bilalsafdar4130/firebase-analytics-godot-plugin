@@ -10,7 +10,7 @@ extends RefCounted
 
 
 func run() -> Array[MSTestCase]:
-	return [_event_names(), _identifiers()]
+	return [_event_names(), _identifiers(), _ad_impression_owner()]
 
 
 func _event_names() -> MSTestCase:
@@ -45,4 +45,26 @@ func _identifiers() -> MSTestCase:
 	test.check(not MSAnalytics._is_valid_identifier("1a"), "leading digit")
 	test.check(not MSAnalytics._is_valid_identifier("a b"), "a space")
 	test.check(not MSAnalytics._is_valid_identifier("a.b"), "a dot")
+	return test
+
+
+## Who sends `ad_impression`. Getting this wrong is silent and expensive in the
+## other direction from most analytics bugs: nothing goes missing, every AdMob
+## impression and its revenue is simply reported twice.
+func _ad_impression_owner() -> MSTestCase:
+	var test := MSTestCase.new("ad_impression is sent once per impression")
+	test.check(
+		not MSAnalytics.sends_ad_impression("admob", true),
+		"a linked AdMob app logs it itself, so the SDK does not"
+	)
+	test.check(
+		MSAnalytics.sends_ad_impression("admob", false),
+		"an AdMob app that is not linked gets it from the SDK"
+	)
+	test.check(
+		MSAnalytics.sends_ad_impression("applovin_max", true),
+		"AppLovin MAX never logs it to Firebase, linked AdMob or not"
+	)
+	test.check(not MSAnalytics.sends_ad_impression("", true), "no provider, no event")
+	test.check(not MSAnalytics.sends_ad_impression("none", false), "ads off, no event")
 	return test

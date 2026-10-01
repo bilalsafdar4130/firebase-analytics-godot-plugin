@@ -21,8 +21,32 @@ const SOURCES := {
 }
 
 
+## Where the pinned Godot version is stated. A workflow that builds against a
+## different engine than the one the editor pins is how an AAR ends up compiled
+## for an engine no game runs.
+const ENGINE_PIN_SOURCES := {
+	"android.yml": "res://.github/workflows/android.yml",
+	"gdscript.yml": "res://.github/workflows/gdscript.yml",
+}
+
+
 func run() -> Array[MSTestCase]:
-	return [_all_five_agree()]
+	return [_all_five_agree(), _engine_pin_agrees()]
+
+
+func _engine_pin_agrees() -> MSTestCase:
+	var test := MSTestCase.new("the pinned Godot version agrees with CI")
+	var expected: String = MobileServicesEditorConfig.GODOT_VERSION
+	var regex := RegEx.new()
+	regex.compile("GODOT_VERSION:\\s*\"([0-9.]+)\"")
+	for label in ENGINE_PIN_SOURCES:
+		var path: String = ENGINE_PIN_SOURCES[label]
+		if not FileAccess.file_exists(path):
+			# A copy of the addon inside a game has no workflows of its own.
+			continue
+		var found := regex.search(FileAccess.get_file_as_string(path))
+		test.equals(found.get_string(1) if found != null else "<none>", expected, "%s builds against the pinned Godot" % label)
+	return test
 
 
 func _all_five_agree() -> MSTestCase:

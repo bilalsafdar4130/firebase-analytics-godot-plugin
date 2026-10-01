@@ -6,8 +6,9 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 //
 // EVERY VERSION BELOW IS COPIED FROM THE ENGINE'S OWN ANDROID TEMPLATE
 // (platform/android/java/app/config.gradle at the Godot tag this addon targets:
-// GODOT 4.6 — AGP 8.6.1, Kotlin 2.1.20, compileSdk 35, minSdk 24, Java 17,
-// and a Gradle 8.11.1 wrapper).
+// GODOT 4.7.2 — AGP 8.6.1, Kotlin 2.1.21, compileSdk 36, minSdk 24, Java 17,
+// and a Gradle 8.11.1 wrapper). Every game in this studio is pinned to 4.7.2;
+// see docs/versions.md.
 //
 // THIS IS A HARD CONSTRAINT, NOT A PREFERENCE. Three reasons, and the third is
 // the one that actually broke a build:
@@ -46,7 +47,7 @@ buildscript {
 	}
 	dependencies {
 		classpath("com.android.tools.build:gradle:8.6.1")
-		classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.20")
+		classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.21")
 	}
 }
 
@@ -66,11 +67,11 @@ subprojects {
 	apply(plugin = "org.jetbrains.kotlin.android")
 
 	extensions.configure<LibraryExtension>("android") {
-		compileSdk = 35
+		compileSdk = 36
 		defaultConfig {
 			// AT OR BELOW THE HOST APP'S FLOOR. A library that demands more than
 			// the app does fails the app's manifest merge, and 24 is what Godot
-			// 4.6's own template requires (godot-lib itself will not merge into
+			// 4.7.2's own template requires (godot-lib itself will not merge into
 			// an app declaring less). The ad and billing SDKs have floors of
 			// their own, but they arrive as dependencies of the APP — so a game
 			// that enables them raises its own export preset's Min SDK, and this

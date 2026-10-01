@@ -52,7 +52,7 @@ enum State {
 	FAILED,
 }
 
-const VERSION := "2.1.3"
+const VERSION := "2.1.4"
 
 ## Where each service's native half lives. Six plugins rather than one, so a
 ## game that wants analytics and nothing else ships neither the ad SDK nor the
@@ -429,6 +429,11 @@ func _connect_ad_wiring() -> void:
 
 
 func _on_ad_impression(_placement: String, info: Dictionary) -> void:
+	if not MSAnalytics.sends_ad_impression(
+		str(info.get("provider", ads.get_provider())),
+		bool(config.analytics["admob_linked_to_firebase"])
+	):
+		return
 	analytics.log_ad_impression(info)
 
 
