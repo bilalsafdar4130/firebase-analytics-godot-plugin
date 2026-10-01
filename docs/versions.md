@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Godot | 4.3 – 4.6. Developed and built in CI against **4.6**. |
-| Android | minSdk **24**, compileSdk **35**, targetSdk whatever your export preset sets (Play requires 34+) |
+| Godot | **4.7.2**, pinned. Every game using this SDK opens and exports with exactly this version, CI builds against it, and the editor plugin warns when a project is opened in anything else. |
+| Android | minSdk **24**, compileSdk **36**, targetSdk whatever your export preset sets (Play requires 35+; the games set 36) |
 | Android ABIs | `arm64-v8a` (required), `armeabi-v7a` (works). `x86_64` only for emulators. |
 | iOS | **14.0**+, arm64. The floor is set by `AppTrackingTransparency`. |
 | JDK | **17** |
-| Kotlin | 2.1.20 |
+| Kotlin | 2.1.21 |
 | Android Gradle Plugin | 8.6.1 |
 | Gradle | 8.11.1 (the wrapper from the engine's own build template) |
 
@@ -17,8 +17,8 @@
 
 **They are copied from the engine, and they are a hard constraint.** Godot's
 Android build template pins them in
-`platform/android/java/app/config.gradle`; for 4.6 that is AGP 8.6.1, Gradle
-8.11.1, Kotlin 2.1.20, compileSdk 35, minSdk 24, Java 17.
+`platform/android/java/app/config.gradle`; for 4.7.2 that is AGP 8.6.1, Gradle
+8.11.1, Kotlin 2.1.21, compileSdk 36, minSdk 24, Java 17.
 
 Three things break if this addon drifts from them, and the third is the one that
 actually broke a build:
@@ -46,7 +46,10 @@ actually broke a build:
    error names the engine, not this addon.
 
 **On a Godot upgrade:** read that `config.gradle` at the new tag and move
-`android/build.gradle.kts` to match. That is the whole procedure.
+`android/build.gradle.kts` to match, then change the version in the four places
+that state it — `MobileServicesEditorConfig.GODOT_VERSION`, `GODOT_VERSION` in
+`.github/workflows/android.yml` and `gdscript.yml` (`tests/test_versions.gd`
+fails if those three disagree), and every game's `publish-play.yml`.
 
 **minSdk 24** is the engine's floor, and this addon does not raise it. The ad and
 billing SDKs have higher floors of their own, but they are dependencies of the

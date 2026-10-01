@@ -17,6 +17,28 @@ const SETTING_ENVIRONMENT := "mobile_services/config/environment"
 ## `MobileServices.VERSION`; `tests/test_versions.gd` checks that it does.
 const VERSION := "2.1.4"
 
+## The ONE Godot version this SDK and every game using it are pinned to.
+##
+## The native half compiles against that engine's `godot-lib` and copies its
+## Android toolchain (android/build.gradle.kts), so a game opened in another
+## version exports AARs built for an engine it is not running. Must match
+## `GODOT_VERSION` in .github/workflows/android.yml and gdscript.yml;
+## `tests/test_versions.gd` checks that it does.
+const GODOT_VERSION := "4.7.2"
+
+
+## Why the running editor is not the pinned one, or "" when it is.
+static func engine_mismatch() -> String:
+	var info := Engine.get_version_info()
+	var running := "%d.%d.%d" % [int(info.get("major", 0)), int(info.get("minor", 0)), int(info.get("patch", 0))]
+	if running == GODOT_VERSION:
+		return ""
+	return (
+		"this project is pinned to Godot %s and is open in %s. " % [GODOT_VERSION, running]
+		+ "Open it with %s so the editor, the export templates and the " % GODOT_VERSION
+		+ "Mobile Services AARs are all built for the same engine."
+	)
+
 
 ## The configuration a build will actually run with.
 ##
