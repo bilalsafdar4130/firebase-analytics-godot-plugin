@@ -13,6 +13,7 @@ import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import com.android.billingclient.api.UnfetchedProduct
 import com.bilalsafdar.godot.mobileservices.core.Json
 import com.bilalsafdar.godot.mobileservices.core.MobileServicesPlugin
 import org.godotengine.godot.Godot
@@ -61,6 +62,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		SignalInfo("billing_failed", Int::class.javaObjectType, String::class.java),
 		SignalInfo("products_loaded", String::class.java),
 		SignalInfo("products_load_failed", Int::class.javaObjectType, String::class.java),
+		SignalInfo("products_unfetched", String::class.java),
 		SignalInfo("purchase_updated", String::class.java),
 		SignalInfo(
 			"purchase_failed",
@@ -170,6 +172,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	fun queryProducts() = onUi("queryProducts") {
 		val current = client ?: return@onUi
 		val collected = ArrayList<JSONObject>()
+		val unfetched = ArrayList<JSONObject>()
 		var outstanding = 0
 		for (type in listOf(BillingClient.ProductType.INAPP, BillingClient.ProductType.SUBS)) {
 			val ids = productTypes.filterValues { it == type }.keys
@@ -181,10 +184,8 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 					.setProductType(type)
 					.build()
 			}
-			// Billing 8: the listener receives a QueryProductDetailsResult, not a
-			// bare list. Products Play could not return (unknown id, not active
-			// in the Console) are in `unfetchedProductList` and are simply absent
-			// from the catalogue, exactly as they were under Billing 7.
+			// Billing 8+: the listener receives a QueryProductDetailsResult, not a
+			// bare list, and says per product why Play could NOT return one.
 			current.queryProductDetailsAsync(
 				QueryProductDetailsParams.newBuilder().setProductList(products).build()
 			) { result, queried ->
@@ -194,20 +195,65 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 							details[item.productId] = item
 							collected.add(describe(item))
 						}
+						for (missing in queried.unfetchedProductList) {
+							unfetched.add(
+								Json.obj(
+									"id" to missing.productId,
+									"reason" to unfetchedReason(missing.statusCode)
+								)
+							)
+						}
 					} else {
 						signal("products_load_failed", result.responseCode, result.debugMessage)
 					}
 					outstanding -= 1
 					if (outstanding == 0) {
-						signal("products_loaded", Json.array(collected))
+						finishCatalogue(collected, unfetched)
 					}
 				}
 			}
 		}
 		if (outstanding == 0) {
-			signal("products_loaded", Json.array(collected))
+			finishCatalogue(collected, unfetched)
 		}
 	}
+
+	/**
+	 * Reports the catalogue, and before it every product Play would not sell.
+	 *
+	 * THE UNFETCHED LIST IS THE ANSWER TO "MY BUY BUTTON NEVER APPEARS". A
+	 * product id that does not match the Play Console, a product left inactive,
+	 * or one with no offer this player may buy all used to vanish silently from
+	 * the catalogue. Play now says which and why, so the game's diagnostics can
+	 * too. Sent first, so the GDScript side knows it when `products_loaded`
+	 * arrives.
+	 */
+	private fun finishCatalogue(collected: List<JSONObject>, unfetched: List<JSONObject>) {
+		if (unfetched.isNotEmpty()) {
+			signal("products_unfetched", Json.array(unfetched))
+		}
+		signal("products_loaded", Json.array(collected))
+	}
+
+	private fun unfetchedReason(code: Int): String = when (code) {
+		UnfetchedProduct.StatusCode.PRODUCT_NOT_FOUND -> "product_not_found"
+		UnfetchedProduct.StatusCode.INVALID_PRODUCT_ID_FORMAT -> "invalid_product_id"
+		UnfetchedProduct.StatusCode.NO_ELIGIBLE_OFFER -> "no_eligible_offer"
+		else -> "unknown"
+	}
+
+	/**
+	 * The purchase option a one-time product is sold through.
+	 *
+	 * Billing 8 gave one-time products several purchase options and offers.
+	 * `oneTimePurchaseOfferDetails` is the one the Play Console marks backwards
+	 * compatible, and is null when none is -- which, read alone, would show a
+	 * product Play is happily selling as having no price. The first listed offer
+	 * is the fallback, and [purchase] buys exactly what this showed.
+	 */
+	private fun oneTimeOffer(product: ProductDetails): ProductDetails.OneTimePurchaseOfferDetails? =
+		product.oneTimePurchaseOfferDetails
+			?: product.oneTimePurchaseOfferDetailsList?.firstOrNull()
 
 	/**
 	 * One product as the GDScript side wants it.
@@ -218,7 +264,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	 * some locale, and the store screen is where that is least forgivable.
 	 */
 	private fun describe(product: ProductDetails): JSONObject {
-		val oneTime = product.oneTimePurchaseOfferDetails
+		val oneTime = oneTimeOffer(product)
 		val json = Json.obj(
 			"id" to product.productId,
 			"title" to product.title,
@@ -281,10 +327,24 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 			}
 			val builder = BillingFlowParams.ProductDetailsParams.newBuilder()
 				.setProductDetails(product)
-			// A subscription REQUIRES an offer token; a one-time product must not
-			// have one. Getting this wrong is a DEVELOPER_ERROR with no
-			// explanation, so pick the base plan when the game did not choose.
-			if (productType == "subscription") {
+			// A subscription REQUIRES an offer token. Getting this wrong is a
+			// DEVELOPER_ERROR with no explanation, so pick the base plan when the
+			// game did not choose.
+			//
+			// A one-time product takes one only since Billing 8, to pick one of
+			// several purchase options. Left out, Play sells the backwards-
+			// compatible option -- so a token is only set when the game chose an
+			// offer, or when there is no such option and [describe] priced the
+			// first listed one instead.
+			if (productType != "subscription") {
+				val token = offerToken.ifEmpty {
+					if (product.oneTimePurchaseOfferDetails != null) ""
+					else oneTimeOffer(product)?.offerToken.orEmpty()
+				}
+				if (token.isNotEmpty()) {
+					builder.setOfferToken(token)
+				}
+			} else {
 				val token = offerToken.ifEmpty {
 					product.subscriptionOfferDetails?.firstOrNull()?.offerToken.orEmpty()
 				}
@@ -320,13 +380,34 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 			if (result.responseCode != BillingClient.BillingResponseCode.OK) {
 				val product = purchaseInFlight
 				purchaseInFlight = ""
-				signal("purchase_failed", product, result.responseCode, result.debugMessage)
+				signal("purchase_failed", product, result.responseCode, failureMessage(result))
 				return@safely
 			}
 			purchaseInFlight = ""
 			for (purchase in purchases.orEmpty()) {
 				signal("purchase_updated", describe(purchase))
 			}
+		}
+	}
+
+	/**
+	 * Play's debug message, led by the Billing 8 sub-response code when there
+	 * is one -- the only place "the card was declined for insufficient funds"
+	 * is distinguishable from any other ERROR.
+	 */
+	private fun failureMessage(result: BillingResult): String {
+		val reason = when (result.onPurchasesUpdatedSubResponseCode) {
+			BillingClient.OnPurchasesUpdatedSubResponseCode.PAYMENT_DECLINED_DUE_TO_INSUFFICIENT_FUNDS ->
+				"payment declined: insufficient funds"
+			BillingClient.OnPurchasesUpdatedSubResponseCode.USER_INELIGIBLE ->
+				"this account is not eligible for the offer"
+			else -> ""
+		}
+		val debug = result.debugMessage.orEmpty()
+		return when {
+			reason.isEmpty() -> debug
+			debug.isEmpty() -> reason
+			else -> "$reason ($debug)"
 		}
 	}
 

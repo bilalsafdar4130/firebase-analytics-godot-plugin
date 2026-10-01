@@ -131,9 +131,13 @@ MobileServices.iap.purchase("premium_monthly", offer["offer_token"])
 ```
 
 Leave the token empty for the base plan. On Android a subscription **requires**
-an offer token and a one-time product must not have one; the SDK picks the base
-plan for you when you do not choose, because getting it wrong is a
-`DEVELOPER_ERROR` with no explanation.
+an offer token; the SDK picks the base plan for you when you do not choose,
+because getting it wrong is a `DEVELOPER_ERROR` with no explanation.
+
+One-time products have purchase options and offers of their own since Play
+Billing 8. Leave the token empty and Play sells the option the Play Console
+marks *backwards compatible*; if none is, the SDK prices and sells the first
+listed offer instead, so the product never shows up without a price.
 
 Every subscription needs an **active base plan** in the Play Console before any
 of this works.
@@ -175,6 +179,23 @@ prints; do the same in your own code.
   wrong".
 
 Both are silent until a player complains.
+
+## When a BUY button never appears
+
+The product is missing from `products_loaded`, so the game has no price to show.
+On Android, Play now says why, and the SDK passes it on — a warning in the log,
+the `products_unavailable` signal, and `get_unavailable_products()`:
+
+```gdscript
+MobileServices.iap.products_unavailable.connect(func(products):
+    for name in products:
+        print("%s is not on sale: %s" % [name, products[name]])
+)
+```
+
+`product_not_found` is nearly always one of: the id differs from the Play
+Console (case included), the product is not **Active**, or the build was not
+installed from a Play track. `docs/troubleshooting.md` has the full list.
 
 ## Testing
 

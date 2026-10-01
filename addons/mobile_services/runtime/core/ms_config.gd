@@ -459,8 +459,15 @@ func get_product(product_name: String) -> Dictionary:
 	return products.get(product_name, {})
 
 
+## For the headless tests only: what [method current_platform] answers instead
+## of the OS, so purchase handling keyed on `android_id` can run on Linux.
+static var platform_override := ""
+
+
 ## "android", "ios", or "" on any platform with no native half.
 static func current_platform() -> String:
+	if not platform_override.is_empty():
+		return platform_override
 	match OS.get_name():
 		"Android":
 			return "android"
