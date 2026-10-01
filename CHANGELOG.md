@@ -3,6 +3,20 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## 2.1.4
+
+### Fixed
+
+- **AdMob impressions and revenue were counted twice in Firebase.** With
+  `analytics/auto_ad_events` on, the SDK logged `ad_impression` (with `value`
+  and `currency`) for every AdMob paid event. An AdMob app linked to its
+  Firebase project already logs that event itself, so every impression and
+  every cent of AdMob revenue appeared twice. New key
+  `analytics/admob_linked_to_firebase` (default `true`): the SDK leaves AdMob's
+  `ad_impression` to AdMob and still sends it for networks that do not log it
+  themselves (AppLovin MAX). `MSAnalytics.sends_ad_impression()` is the rule,
+  tested in `tests/test_analytics_rules.gd`.
+
 ## 2.1.3
 
 ### Fixed

@@ -236,8 +236,25 @@ func log_post_score(score: int, level: String = "") -> Dictionary:
 	return log_event("post_score", params)
 
 
+## Whether THIS SDK should send `ad_impression` for an impression served by
+## `provider`, or leave it to the ad network.
+##
+## AN ADMOB APP LINKED TO FIREBASE ALREADY SENDS IT. Once the AdMob app is linked
+## to the Firebase project (AdMob → Apps → App settings → Linked services), the
+## Google Mobile Ads SDK logs `ad_impression` itself, revenue included, through
+## the same Analytics instance. Sending ours as well counts every AdMob impression
+## and every cent of AdMob revenue twice, and Firebase's own guidance is to log it
+## manually only for networks that do not do this. AppLovin MAX is one of those,
+## so its impressions are still sent from here.
+static func sends_ad_impression(provider: String, admob_linked: bool) -> bool:
+	if provider == "admob" and admob_linked:
+		return false
+	return not provider.is_empty() and provider != "none"
+
+
 ## Firebase's `ad_impression`, with the parameter names its ad-revenue reports
-## look for. [MSAds] sends this for you when `analytics/auto_ad_events` is on.
+## look for. [MSAds] sends this for you when `analytics/auto_ad_events` is on and
+## [method sends_ad_impression] says the network does not send it itself.
 func log_ad_impression(info: Dictionary) -> Dictionary:
 	return log_event("ad_impression", {
 		"ad_platform": str(info.get("provider", "")),

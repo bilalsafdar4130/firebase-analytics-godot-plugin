@@ -58,6 +58,7 @@ var analytics := {
 	"remote_config_enabled": false,
 	"remote_config_min_fetch_seconds": 3600,
 	"auto_ad_events": true,
+	"admob_linked_to_firebase": true,
 	"auto_iap_events": true,
 	"sync_user_id": true,
 }

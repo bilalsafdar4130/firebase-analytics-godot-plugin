@@ -66,6 +66,7 @@ key. Those belong on a server. See [`security.md`](security.md).
 | `remote_config_enabled` | `false` | Needs `enabled`. |
 | `remote_config_min_fetch_seconds` | `3600` | Set to `0` in a development overlay. Shipping that is the mistake to avoid. |
 | `auto_ad_events` | `true` | Send Firebase's `ad_impression` and `rewarded_ad_completed`. |
+| `admob_linked_to_firebase` | `true` | The AdMob app is linked to this Firebase project, so AdMob logs `ad_impression` itself and the SDK sends it only for other networks (AppLovin MAX). Set `false` if AdMob is not linked. |
 | `auto_iap_events` | `true` | Send Firebase's `purchase` and `purchase_failed`. |
 | `sync_user_id` | `true` | Use `MobileServices.player`'s id as the Firebase user id. |
 

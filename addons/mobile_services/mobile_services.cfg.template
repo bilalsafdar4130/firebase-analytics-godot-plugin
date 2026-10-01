@@ -39,6 +39,11 @@ remote_config_enabled = false
 remote_config_min_fetch_seconds = 3600
 ; Send Firebase's ad_impression / rewarded_ad_completed events automatically.
 auto_ad_events = true
+; The AdMob app is linked to this Firebase project (AdMob -> App settings ->
+; Linked services). Linked AdMob logs ad_impression itself, so the SDK does not
+; send its own for AdMob (it would double the revenue); other networks such as
+; AppLovin MAX are still sent. Set false only if AdMob is NOT linked.
+admob_linked_to_firebase = true
 ; Send Firebase's purchase / purchase_failed events automatically.
 auto_iap_events = true
 ; Use the player id from MobileServices.player as the Firebase user id.
