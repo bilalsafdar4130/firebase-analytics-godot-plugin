@@ -16,9 +16,19 @@ extends RefCounted
 ## developed.
 ##
 ## IT ALSO SURVIVES VERSION SKEW. A game running last release's AAR against
-## this release's GDScript hits `has_method` returning false and gets
+## this release's GDScript finds the method missing and gets
 ## `SERVICE_UNAVAILABLE` with the missing method named, rather than a crash on
-## the player's device. That is worth the `has_method` call per invocation.
+## the player's device. That is worth one lookup per invocation.
+##
+## THE LOOKUP IS [method answers], NEVER A BARE `has_method`. On Android every
+## plugin arrives as a `JNISingleton`, and its `@UsedByGodot` methods live in
+## that object's own JNI method map. `Object.has_method` is not virtual and only
+## looks at ClassDB, an attached script and `free` -- so for an Android plugin it
+## answers false for every method the plugin has. This class used to ask exactly
+## that, and every call into Firebase, AdMob, Play Billing and UMP was dropped
+## as "missing" on every Android device: no events, no ads, no purchases, while
+## the AAB itself was provably complete. `has_java_method` is the engine's own
+## answer to the question and is a real bound method, so `has_method` can see it.
 
 ## The singleton name, as registered by the native plugin.
 var name: String = ""
@@ -50,7 +60,25 @@ func get_object() -> Object:
 
 
 func has(method: String) -> bool:
-	return is_available() and _singleton.has_method(method)
+	return is_available() and answers(_singleton, method)
+
+
+## Whether `target` will answer a call to `method`, asked the way the engine
+## needs it asked for each kind of plugin object.
+##
+## iOS plugins and anything GDScript-side bind their methods in ClassDB, so
+## `has_method` is right for them. An Android `JNISingleton` binds exactly one
+## method there, `has_java_method`, and keeps the rest in its JNI method map;
+## see the note at the top of this file for what asking `has_method` alone cost.
+## Static so a test can hand it an object shaped like either kind.
+static func answers(target: Object, method: String) -> bool:
+	if target == null or not is_instance_valid(target):
+		return false
+	if target.has_method(method):
+		return true
+	if target.has_method("has_java_method"):
+		return bool(target.call("has_java_method", method))
+	return false
 
 
 ## Calls a native method, or answers `fallback` if it cannot.
@@ -63,7 +91,7 @@ func has(method: String) -> bool:
 func call_method(method: String, args: Array = [], fallback: Variant = null) -> Variant:
 	if not is_available():
 		return fallback
-	if not _singleton.has_method(method):
+	if not answers(_singleton, method):
 		if not _missing.has(method):
 			_missing[method] = true
 			if _log != null:
