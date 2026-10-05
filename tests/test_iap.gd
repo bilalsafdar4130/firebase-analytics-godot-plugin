@@ -24,8 +24,13 @@ class FakeBilling:
 	signal purchases_queried(purchases_json: String)
 	signal purchase_consumed(token: String, store_id: String)
 	signal purchase_acknowledged(token: String, store_id: String)
+	signal purchases_query_failed(code: int, message: String)
+	signal purchase_finish_failed(store_id: String, code: int, message: String)
 
 	var calls: Array[String] = []
+
+	func reconnect() -> void:
+		calls.append("reconnect")
 
 	func initializeBilling(_products_json: String) -> void:
 		calls.append("initializeBilling")
@@ -54,6 +59,12 @@ func run() -> Array[MSTestCase]:
 		_already_owned_restores_purchases(),
 		_a_cancel_is_not_a_failure(),
 		_a_consumable_is_granted_once_per_token(),
+		_a_restored_purchase_is_marked_restored(),
+		_an_unanswered_sheet_stops_blocking_after_a_while(),
+		_a_billing_failure_clears_the_open_sheet(),
+		_a_failed_restore_revokes_nothing(),
+		_a_finish_failure_is_not_a_purchase_failure(),
+		_reconnect_asks_the_bridge(),
 	]
 	MSConfig.platform_override = ""
 	return cases
@@ -179,5 +190,112 @@ func _a_consumable_is_granted_once_per_token() -> MSTestCase:
 	test.equals(granted, ["coins_big"], "the second report of the same token grants nothing")
 	test.equals(fake.calls.count("consume"), 2, "but it is consumed again in case the first failed")
 	test.check(not fake.calls.has("acknowledge"), "a consumable is consumed, not acknowledged")
+	iap.free()
+	return test
+
+
+func _a_restored_purchase_is_marked_restored() -> MSTestCase:
+	var test := MSTestCase.new("a purchase finished in an earlier session is marked restored")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	var heard := []
+	iap.purchase_completed.connect(func(p: Dictionary) -> void: heard.append(p))
+	fake.purchase_updated.emit(JSON.stringify({
+		"product_id": "remove_ads", "state": "purchased", "token": "new",
+		"acknowledged": false,
+	}))
+	fake.purchases_queried.emit(JSON.stringify([{
+		"product_id": "remove_ads", "state": "purchased", "token": "old",
+		"acknowledged": true,
+	}]))
+	test.equals(heard.size(), 2, "both are delivered, so a reinstall gets its purchase back")
+	test.equals(heard[0].get("restored"), false, "a live sale is not a restore")
+	test.equals(heard[1].get("restored"), true, "an acknowledged one is")
+	iap.revoke_entitlement("remove_ads")
+	iap.free()
+	return test
+
+
+func _an_unanswered_sheet_stops_blocking_after_a_while() -> MSTestCase:
+	var test := MSTestCase.new("a sheet Play never answered stops blocking the next purchase")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	test.check((iap.purchase("remove_ads")).is_empty(), "the first sheet opens")
+	var refused := iap.purchase("coins_small")
+	test.equals(refused.get("code"), MSError.NOT_READY, "a second one at once is refused")
+	test.equals(iap.get_purchase_in_flight(), "remove_ads", "the first is still the open one")
+	iap._purchase_started_ms -= int((MSIap.PURCHASE_STALE_SECONDS + 1.0) * 1000.0)
+	test.check((iap.purchase("coins_small")).is_empty(), "after the limit, the next one opens")
+	test.equals(fake.calls.count("purchase:coins_small"), 1, "and reaches the bridge once")
+	iap.free()
+	return test
+
+
+func _a_billing_failure_clears_the_open_sheet() -> MSTestCase:
+	var test := MSTestCase.new("billing failing clears the open sheet")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	iap.purchase("remove_ads")
+	fake.billing_failed.emit(2, "Service unavailable")
+	test.equals(iap.get_purchase_in_flight(), "", "nothing is left in flight")
+	fake.billing_ready.emit()
+	test.check((iap.purchase("remove_ads")).is_empty(), "a purchase opens again once it reconnects")
+	iap.free()
+	return test
+
+
+func _a_failed_restore_revokes_nothing() -> MSTestCase:
+	var test := MSTestCase.new("a restore Play could not answer revokes nothing")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	fake.purchase_updated.emit(JSON.stringify({
+		"product_id": "remove_ads", "state": "purchased", "token": "t",
+		"acknowledged": false,
+	}))
+	test.check(iap.has_entitlement("remove_ads"), "owned after buying it")
+	var failures := []
+	iap.restore_failed.connect(func(e: Dictionary) -> void: failures.append(e))
+	fake.purchases_query_failed.emit(12, "network")
+	test.equals(failures.size(), 1, "restore_failed fires")
+	test.equals(failures[0].get("code"), MSError.NETWORK_ERROR, "with the translated reason")
+	test.check(iap.has_entitlement("remove_ads"), "and the purchase is still owned")
+	iap.revoke_entitlement("remove_ads")
+	iap.free()
+	return test
+
+
+func _a_finish_failure_is_not_a_purchase_failure() -> MSTestCase:
+	var test := MSTestCase.new("a consume that did not land is not a failed purchase")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	var failed := []
+	var unfinished := []
+	iap.purchase_failed.connect(func(p: String, _e: Dictionary) -> void: failed.append(p))
+	iap.purchase_finish_failed.connect(
+		func(p: String, e: Dictionary) -> void: unfinished.append([p, e])
+	)
+	fake.purchase_finish_failed.emit("com.example.coins_big", 6, "could not consume: error")
+	test.equals(unfinished.size(), 1, "purchase_finish_failed fires")
+	test.equals(unfinished[0][0], "coins_big", "naming the product, not the store id")
+	# An older bridge sends the same thing as a purchase failure with no product.
+	fake.purchase_failed.emit("", 6, "could not acknowledge: error")
+	test.equals(unfinished.size(), 2, "and an older bridge's empty-product failure is one too")
+	test.is_empty_array(failed, "purchase_failed, which a game shows the player, never fires")
+	iap.free()
+	return test
+
+
+func _reconnect_asks_the_bridge() -> MSTestCase:
+	var test := MSTestCase.new("reconnect() asks the bridge to connect again")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	test.check((iap.reconnect()).is_empty(), "it is accepted")
+	test.check(fake.calls.has("reconnect"), "and reaches the bridge")
 	iap.free()
 	return test

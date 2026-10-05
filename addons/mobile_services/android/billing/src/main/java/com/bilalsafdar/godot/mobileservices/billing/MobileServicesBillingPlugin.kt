@@ -42,8 +42,21 @@ import org.json.JSONObject
  *
  * THE CONNECTION DROPS AND MUST BE REBUILT. Play's service is a bound service
  * that goes away when Play updates itself — which happens while games are
- * running. [reconnect] backs off and retries; without it, a game silently loses
- * the ability to sell anything part-way through a session.
+ * running. Billing 8's automatic reconnection re-binds on the next call, and
+ * [scheduleReconnect] backs off and retries on top of it; without them, a game
+ * silently loses the ability to sell anything part-way through a session.
+ *
+ * A FAILED SETUP IS RETRIED TOO. The first connection fails for reasons that
+ * clear up on their own — no network at launch, Play busy updating, the Play
+ * account not signed in yet — and a store that gave up on the first answer
+ * stayed shut for the rest of the session. It retries a few times with
+ * back-off, and the game can ask again at any time with [reconnect] (opening a
+ * store screen is the natural moment).
+ *
+ * FINISHING A PURCHASE HAS ITS OWN FAILURE SIGNAL. A consume or acknowledge
+ * that does not land is not a failed purchase — the player paid and has been
+ * granted — so it is reported on `purchase_finish_failed`, never on
+ * `purchase_failed`, which a game shows to the player.
  */
 class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 
@@ -53,6 +66,12 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		/** Play's own reconnect guidance: back off, cap, keep trying. */
 		private const val RECONNECT_BASE_MS = 1_000L
 		private const val RECONNECT_MAX_MS = 60_000L
+
+		/** How many times a setup that Play ANSWERED with an error is retried
+		 * before waiting for the game to call [reconnect]. A disconnect is
+		 * always retried; a refusal six times in a row (about a minute) is a
+		 * device that will not sell anything until something changes. */
+		private const val SETUP_RETRY_LIMIT = 6
 	}
 
 	override fun getPluginName(): String = PLUGIN_NAME
@@ -69,8 +88,13 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 			String::class.java, Int::class.javaObjectType, String::class.java
 		),
 		SignalInfo("purchases_queried", String::class.java),
+		SignalInfo("purchases_query_failed", Int::class.javaObjectType, String::class.java),
 		SignalInfo("purchase_consumed", String::class.java, String::class.java),
-		SignalInfo("purchase_acknowledged", String::class.java, String::class.java)
+		SignalInfo("purchase_acknowledged", String::class.java, String::class.java),
+		SignalInfo(
+			"purchase_finish_failed",
+			String::class.java, Int::class.javaObjectType, String::class.java
+		)
 	)
 
 	private var client: BillingClient? = null
@@ -91,6 +115,8 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	private val tokenStoreIds = HashMap<String, String>()
 
 	private var reconnectDelayMs = RECONNECT_BASE_MS
+	private var setupFailures = 0
+	private var reconnectQueued = false
 	private var purchaseInFlight: String = ""
 
 	@UsedByGodot
@@ -118,6 +144,9 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 					.enableOneTimeProducts()
 					.build()
 			)
+			// Billing 8+: a call made while Play's service is disconnected
+			// re-binds first instead of failing with SERVICE_DISCONNECTED.
+			.enableAutoServiceReconnection()
 			.build()
 		connect()
 	}
@@ -128,11 +157,22 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 			override fun onBillingSetupFinished(result: BillingResult) = safely("onBillingSetupFinished") {
 				if (result.responseCode == BillingClient.BillingResponseCode.OK) {
 					reconnectDelayMs = RECONNECT_BASE_MS
+					setupFailures = 0
 					clearFailure()
 					logInfo("billing connected")
 					signal("billing_ready")
 				} else {
+					setupFailures += 1
 					signal("billing_failed", result.responseCode, result.debugMessage)
+					if (setupFailures < SETUP_RETRY_LIMIT) {
+						logWarn(
+							"billing setup failed (${result.responseCode}); retry " +
+								"$setupFailures of ${SETUP_RETRY_LIMIT - 1} in ${reconnectDelayMs}ms"
+						)
+						scheduleReconnect()
+					} else {
+						logWarn("billing setup failed (${result.responseCode}); waiting for reconnect()")
+					}
 				}
 			}
 
@@ -141,14 +181,42 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 				// disconnects every bound client on the device. Reconnect
 				// quietly, and only tell the game if it never comes back.
 				logWarn("billing disconnected; reconnecting in ${reconnectDelayMs}ms")
-				reconnect()
+				scheduleReconnect()
 			}
 		})
 	}
 
-	private fun reconnect() {
-		handler.postDelayed({ safely("reconnect") { connect() } }, reconnectDelayMs)
+	private fun scheduleReconnect() {
+		if (reconnectQueued) return
+		reconnectQueued = true
+		handler.postDelayed({
+			safely("reconnect") {
+				reconnectQueued = false
+				if (client?.isReady != true) connect()
+			}
+		}, reconnectDelayMs)
 		reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(RECONNECT_MAX_MS)
+	}
+
+	/**
+	 * Tries to connect again now, whatever happened before.
+	 *
+	 * For the game to call when it is about to need the store — a store screen
+	 * opening — after a setup that gave up. Already connected: answers
+	 * `billing_ready` again, so the caller has one signal to wait for either way.
+	 */
+	@UsedByGodot
+	fun reconnect() = onUi("reconnect") {
+		val current = client ?: return@onUi
+		if (current.isReady) {
+			signal("billing_ready")
+			return@onUi
+		}
+		setupFailures = 0
+		reconnectDelayMs = RECONNECT_BASE_MS
+		handler.removeCallbacksAndMessages(null)
+		reconnectQueued = false
+		connect()
 	}
 
 	@UsedByGodot
@@ -417,11 +485,18 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	 * This is what makes a reinstall or a second device keep a player's
 	 * purchases, and what the App Store's "Restore purchases" equivalent calls.
 	 * Two queries again, for the reason in [queryProducts].
+	 *
+	 * ALL OR NOTHING. The GDScript side treats the answer as the complete list
+	 * of what the account owns and revokes anything missing from it, so a list
+	 * with one half missing (a query that timed out) would take a paying
+	 * player's purchase away. If either query fails, `purchases_query_failed`
+	 * is sent instead and nothing is revoked.
 	 */
 	@UsedByGodot
 	fun queryPurchases() = onUi("queryPurchases") {
 		val current = client ?: return@onUi
 		val collected = ArrayList<JSONObject>()
+		var failure: BillingResult? = null
 		var outstanding = 0
 		for (type in listOf(BillingClient.ProductType.INAPP, BillingClient.ProductType.SUBS)) {
 			if (productTypes.none { it.value == type }) continue
@@ -434,10 +509,17 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 						for (purchase in purchases) {
 							collected.add(JSONObject(describe(purchase)))
 						}
+					} else if (failure == null) {
+						failure = result
 					}
 					outstanding -= 1
 					if (outstanding == 0) {
-						signal("purchases_queried", Json.array(collected))
+						val failed = failure
+						if (failed != null) {
+							signal("purchases_query_failed", failed.responseCode, failed.debugMessage)
+						} else {
+							signal("purchases_queried", Json.array(collected))
+						}
 					}
 				}
 			}
@@ -459,9 +541,11 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 				} else {
 					// Worth reporting: an unconsumed consumable cannot be bought
 					// again, and the player's next attempt fails with a message
-					// about already owning it.
+					// about already owning it. Not on `purchase_failed`: the
+					// player paid and was granted, so there is nothing to show
+					// them. The GDScript side retries it through a restore.
 					signal(
-						"purchase_failed", "", result.responseCode,
+						"purchase_finish_failed", tokenStoreIds[token] ?: "", result.responseCode,
 						"could not consume: ${result.debugMessage}"
 					)
 				}
@@ -481,10 +565,10 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 				} else {
 					// The expensive one: Play refunds an unacknowledged purchase
 					// after three days, and the player keeps whatever the game
-					// granted.
+					// granted. Retried through a restore, like a consume.
 					signal(
-						"purchase_failed", "", result.responseCode,
-						"could not acknowledge: ${result.debugMessage}"
+						"purchase_finish_failed", tokenStoreIds[purchaseToken] ?: "",
+						result.responseCode, "could not acknowledge: ${result.debugMessage}"
 					)
 				}
 			}
@@ -529,6 +613,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	override fun onMainDestroy() {
 		safely("onMainDestroy") {
 			handler.removeCallbacksAndMessages(null)
+			reconnectQueued = false
 			client?.endConnection()
 			client = null
 		}

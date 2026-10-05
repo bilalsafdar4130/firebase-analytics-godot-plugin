@@ -114,7 +114,9 @@ Placements are named in `mobile_services.cfg`. Game code never sees a unit id.
 |---|---|
 | `purchase(product, offer_token := "") -> Dictionary` | Opens the store sheet. **Not** a completed purchase — wait for `purchase_completed`. |
 | `restore_purchases()` | Re-reads what the account owns. Apple requires a button for this. |
-| `refresh_products()` | |
+| `refresh_products()` | Asks for prices again. A failed price list is also retried by itself (5 s, 20 s, 60 s). |
+| `reconnect()` | Connects to the store again if it is not connected; answers `iap_ready` either way. Call it when a store screen opens. |
+| `get_purchase_in_flight() -> String` | The product whose sheet is open, or `""`. A sheet unanswered for `PURCHASE_STALE_SECONDS` (180) stops blocking new purchases. |
 | `has_entitlement(name) -> bool` | The question a game asks. |
 | `is_subscribed(name) -> bool` | True only when a *subscription* grants it. |
 | `get_entitlements() -> Array` | |
@@ -127,10 +129,15 @@ Placements are named in `mobile_services.cfg`. Game code never sees a unit id.
 **Signals:** `iap_ready()`, `iap_failed(error)`, `products_loaded(products)`,
 `products_load_failed(error)`, `products_unavailable(products)`,
 `purchase_started(product)`,
-**`purchase_completed(purchase)`** — grant here, once —
+**`purchase_completed(purchase)`** — grant here, once; `purchase["restored"]` is
+true when the store had already finished it in an earlier session (a launch-time
+restore, not a sale) —
 `purchase_pending(purchase)`, `purchase_failed(product, error)`,
 `purchase_cancelled(product)`, `purchases_restored(products)`,
-`entitlements_changed(entitlements)`.
+`restore_failed(error)` — Play could not say what the account owns; nothing was
+revoked —, `purchase_finish_failed(product, error)` — a consume or acknowledge
+did not land after the player was granted; retried by itself, never shown to a
+player —, `entitlements_changed(entitlements)`.
 
 ---
 

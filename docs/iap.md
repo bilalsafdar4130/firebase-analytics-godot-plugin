@@ -67,6 +67,49 @@ func _on_pending(purchase: Dictionary) -> void:
     $Message.text = "Waiting for payment to clear — you'll get it automatically."
 ```
 
+## Creating the products on Play from the repository
+
+`tools/play_products.py` creates the products in the Play Console for you, from
+two files in the game's repository: `mobile_services.cfg` (the ids and types the
+game already uses) and a catalogue with what Play needs on top -- a title, a
+description and a price:
+
+```json
+{
+  "products": {
+    "remove_ads": {
+      "title": "Remove Ads",
+      "description": "The banner comes off for good.",
+      "usd_price": "2.99"
+    }
+  }
+}
+```
+
+```
+PLAY_SERVICE_ACCOUNT_JSON='{…}' addons/mobile_services/tools/play_products.py \
+    --package com.example.game --config mobile_services.cfg \
+    --catalogue store/play_products.json --mode create
+```
+
+| `--mode` | |
+|---|---|
+| `validate` | Offline: the catalogue and `mobile_services.cfg` name the same products, and every title, description and price is one Play accepts. No key needed. |
+| `check` | What Play has for each product, and its state. Changes nothing. |
+| `create` | Creates what is missing and puts it on sale. **Never touches a product that already exists**, so a price changed by hand in the Console stays changed. |
+| `sync` | Also rewrites existing products' title, description and price to match the catalogue, and puts back on sale anything taken off. |
+
+`--dry-run` prints what would be sent. Each product is created as a Billing 8
+one-time product with one backwards-compatible "buy" option, priced in every
+country by Google's own conversion of `usd_price` (the same as the Console's
+*Set prices* button) and available in countries Play adds later. Consumables are
+not a Console setting; the SDK consumes them after granting.
+
+The service account needs **View app information** and **Manage store
+presence** for the app in *Play Console → Users and permissions*; uploading
+builds needs neither, so the error names them if they are missing. Paid
+products also need the developer account's payments profile set up.
+
 ## Prices
 
 Always show the store's own formatted price:
@@ -167,6 +210,30 @@ of the deadline below.
 
 **Never log a purchase token.** `MSLog.redact` strips them from anything this SDK
 prints; do the same in your own code.
+
+## When something goes wrong
+
+Every failure arrives on a signal, never as an exception, and the SDK retries
+what can be retried by itself:
+
+| What happened | Signal | What the SDK already does | What the game should do |
+|---|---|---|---|
+| Billing did not connect (off-line at launch, Play updating, not signed in to Play) | `iap_failed(error)` | Retries six times with back-off, then waits | Call `reconnect()` when a store screen opens |
+| The connection dropped mid-session | — | Billing 8's automatic reconnection, plus its own back-off | Nothing |
+| The price list did not load | `products_load_failed(error)` | Asks again after 5 s, 20 s and 60 s | Show "…" on the BUY buttons, not an error |
+| A product is not on sale | `products_unavailable(products)` | Logs Play's reason per product | No BUY button for it |
+| The player closed the sheet | `purchase_cancelled(product)` | — | Nothing. Not an error. |
+| The payment is pending | `purchase_pending(purchase)` | Delivers it on a later launch | Say so; grant nothing |
+| The purchase failed | `purchase_failed(product, error)` | `ALREADY_OWNED` re-reads what the account owns | Tell the player in words, by `error.code` |
+| The sheet never answered | — | Stops blocking new purchases after 180 s | Unlock the BUY button on your own timer too |
+| Consume / acknowledge did not land | `purchase_finish_failed(product, error)` | Retries through a restore after 15 s (three times a session), and again at every launch | Log it; never show it — the player has what they paid for |
+| A restore could not reach Play | `restore_failed(error)` | Revokes nothing | "Could not reach Google Play" on the restore button |
+
+`purchase["restored"]` is true for a purchase the store had already finished in
+an earlier session — the launch-time restore re-delivers every non-consumable
+the account owns. Grant on it as usual (that is how a reinstall gets its
+purchase back), but it is not a sale: `analytics/auto_iap_events` does not log
+it as a `purchase`, and neither should a game.
 
 ## Two deadlines that cost real money
 
