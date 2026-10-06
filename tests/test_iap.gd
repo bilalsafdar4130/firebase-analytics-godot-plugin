@@ -32,6 +32,11 @@ class FakeBilling:
 	func reconnect() -> void:
 		calls.append("reconnect")
 
+	var ready := false
+
+	func isReady() -> bool:
+		return ready
+
 	func initializeBilling(_products_json: String) -> void:
 		calls.append("initializeBilling")
 
@@ -65,6 +70,7 @@ func run() -> Array[MSTestCase]:
 		_a_failed_restore_revokes_nothing(),
 		_a_finish_failure_is_not_a_purchase_failure(),
 		_reconnect_asks_the_bridge(),
+		_a_stale_failure_does_not_close_a_connected_store(),
 	]
 	MSConfig.platform_override = ""
 	return cases
@@ -297,5 +303,25 @@ func _reconnect_asks_the_bridge() -> MSTestCase:
 	var fake: FakeBilling = pair[1]
 	test.check((iap.reconnect()).is_empty(), "it is accepted")
 	test.check(fake.calls.has("reconnect"), "and reaches the bridge")
+	iap.free()
+	return test
+
+
+func _a_stale_failure_does_not_close_a_connected_store() -> MSTestCase:
+	var test := MSTestCase.new("a billing failure while connected does not close the store")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	var failures := []
+	iap.iap_failed.connect(func(e: Dictionary) -> void: failures.append(e))
+	fake.ready = true
+	# What 2.3.0 sent right after connecting (seen on a device).
+	fake.billing_failed.emit(5, "Client is already in the process of connecting to billing service.")
+	test.check(iap.is_ready(), "the store stays ready")
+	test.is_empty_array(failures, "and iap_failed is not emitted")
+	fake.ready = false
+	fake.billing_failed.emit(3, "Billing unavailable")
+	test.check(not iap.is_ready(), "a real failure (not connected) still closes it")
+	test.equals(failures.size(), 1, "and is reported")
 	iap.free()
 	return test
