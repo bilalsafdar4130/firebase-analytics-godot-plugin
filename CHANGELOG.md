@@ -3,6 +3,58 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## 2.3.0
+
+A store that cannot get stuck, and products made from the repository.
+
+### Added
+
+- **`tools/play_products.py`** creates a game's in-app products on Google Play
+  from `mobile_services.cfg` and a catalogue file (title, description, USD
+  price), through the Play Developer API's one-time products: checks the two
+  files agree, creates what is missing, prices every country with Google's own
+  conversion, and puts it on sale. Existing products are never changed unless
+  asked (`--mode sync`). Standard library only; `tests/test_play_products.py`
+  runs it against a fake Play in CI.
+- **`MSIap.reconnect()`** connects to Play again after a setup that gave up, or
+  re-announces `iap_ready` when connected. Meant for a store screen to call as
+  it opens.
+- **`restore_failed(error)`**: Play could not say what the account owns.
+- **`purchase_finish_failed(product, error)`**: a consume or acknowledge did not
+  land after the player was granted. It used to arrive as `purchase_failed`
+  with an empty product, which a game could show the player as a failed
+  purchase right after a successful one.
+- **`purchase["restored"]`** is true for a purchase the store had already
+  finished in an earlier session.
+- `get_purchase_in_flight()`.
+
+### Fixed
+
+- **A failed billing setup was never retried.** Off-line at launch, Play
+  updating, or the Play account not signed in yet left the store shut for the
+  whole session. The bridge now retries six times with back-off, uses Billing
+  8's automatic service reconnection, and `reconnect()` asks again on demand.
+- **A purchase sheet that never answered blocked every later purchase** with
+  "already in progress" until the game restarted. After 180 s it no longer
+  blocks; a late answer is still delivered. A billing failure clears it too.
+- **A restore that half-failed revoked purchases.** If either of Play's two
+  purchase queries failed, the other half was taken as everything the account
+  owns and the rest was revoked. A failed query now revokes nothing and is
+  reported on `restore_failed`.
+- **A price list that failed to load stayed failed.** It is asked for again
+  after 5 s, 20 s and 60 s on each connection.
+- **A consume or acknowledge that failed waited for the next launch.** It is
+  retried through a restore 15 s later, up to three times a session.
+- **Every launch logged each owned non-consumable as a new `purchase`** with
+  `analytics/auto_iap_events` on, because the launch-time restore re-delivers
+  it. Restored purchases are no longer logged as revenue.
+
+### Tests
+
+- `tests/test_iap.gd`: restored purchases, an unanswered sheet, billing failure
+  clearing the sheet, a failed restore revoking nothing, finish failures (both
+  bridges), `reconnect()`.
+
 ## 2.2.0
 
 The billing side brought up to date for the games' stores going live.

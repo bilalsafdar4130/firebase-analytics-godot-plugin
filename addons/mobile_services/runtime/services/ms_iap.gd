@@ -21,6 +21,13 @@ extends MSService
 ## grants nothing, and the purchase completes on a later launch through
 ## [method restore_purchases] — which is why `iap/restore_on_start` defaults on.
 ##
+## A STORE THAT CANNOT GET STUCK. Billing that failed to connect is retried
+## (and [method reconnect] asks again on demand); a price list that failed to
+## load is asked for again with back-off; a purchase sheet that never answered
+## stops blocking the next purchase after [constant PURCHASE_STALE_SECONDS]; a
+## consume or acknowledge that did not land is retried through a restore. Each
+## of those used to leave a store shut until the game was restarted.
+##
 ## WHAT THIS CANNOT DO. Entitlements are cached on the device
 ## ([constant CACHE_PATH]) so a player who is off-line still owns what they
 ## bought, and a device cache is editable by anyone who wants to edit it. For a
@@ -31,6 +38,22 @@ extends MSService
 ## Where owned entitlements are remembered between launches. `user://` rather
 ## than `res://`, because it is written at runtime.
 const CACHE_PATH := "user://mobile_services_entitlements.cfg"
+
+## How long a purchase sheet may stay unanswered before a new purchase is
+## allowed anyway. Play answers every sheet it opens, but an activity torn down
+## underneath it (a phone call, the OS reclaiming memory) can lose the answer,
+## and before this limit every later BUY failed with "already in progress" for
+## the rest of the session. Generous, because a player reading a payment sheet
+## is not on a timer; a late answer still delivers through `purchase_updated`.
+const PURCHASE_STALE_SECONDS := 180.0
+
+## Seconds before each automatic retry of a price list that failed to load.
+const PRODUCT_RETRY_SECONDS: Array[float] = [5.0, 20.0, 60.0]
+
+## Restores run to finish a consume or acknowledge that did not land, at most
+## this many per session, this many seconds after the failure.
+const FINISH_RETRY_LIMIT := 3
+const FINISH_RETRY_SECONDS := 15.0
 
 signal iap_ready()
 signal iap_failed(error: Dictionary)
@@ -57,6 +80,14 @@ signal purchase_failed(product: String, error: Dictionary)
 signal purchase_cancelled(product: String)
 ## Everything this account already owns, at start-up or on demand.
 signal purchases_restored(products: Array)
+## Play could not say what this account owns (off-line, Play busy). Nothing was
+## revoked: the answer is all or nothing, and this time it was nothing.
+signal restore_failed(error: Dictionary)
+## The player paid and was granted, but consuming or acknowledging with the
+## store did not land. Not a failed purchase and nothing to show a player: it is
+## retried through a restore. Worth logging, because an unacknowledged purchase
+## is refunded by Google after three days.
+signal purchase_finish_failed(product: String, error: Dictionary)
 ## The set of entitlements changed. Carries the whole set, sorted, so a menu can
 ## rebuild from one signal rather than tracking additions and removals.
 signal entitlements_changed(entitlements: Array)
@@ -72,6 +103,14 @@ var _entitlements := {}
 ## consumable that was already spent.
 var _delivered := {}
 var _purchase_in_flight := ""
+## `Time.get_ticks_msec()` when [member _purchase_in_flight] was set.
+var _purchase_started_ms := 0
+## Retries spent this session; see [constant PRODUCT_RETRY_SECONDS] and
+## [constant FINISH_RETRY_LIMIT].
+var _product_retries := 0
+var _product_retry_queued := false
+var _finish_retries := 0
+var _finish_retry_queued := false
 
 
 func is_enabled() -> bool:
@@ -90,11 +129,13 @@ func setup() -> void:
 		"purchases_queried", "purchase_consumed", "purchase_acknowledged",
 	]:
 		native.connect_signal(signal_name, Callable(self, "_on_native_" + signal_name))
-	# Optional: only the Android bridge from 2.2.0 declares it, and an iOS or an
-	# older plugin without it is not something to warn about.
+	# Optional: only newer Android bridges declare these (products_unfetched
+	# from 2.2.0, the other two from 2.3.0), and an iOS or an older plugin
+	# without them is not something to warn about.
 	var plugin := native.get_object()
-	if plugin != null and plugin.has_signal("products_unfetched"):
-		native.connect_signal("products_unfetched", _on_native_products_unfetched)
+	for optional in ["products_unfetched", "purchases_query_failed", "purchase_finish_failed"]:
+		if plugin != null and plugin.has_signal(optional):
+			native.connect_signal(optional, Callable(self, "_on_native_" + optional))
 	native.call_method("initializeBilling", [JSON.stringify(_product_manifest())])
 
 
@@ -144,10 +185,18 @@ func purchase(product_name: String, offer_token: String = "") -> Dictionary:
 			)
 		)
 	if not _purchase_in_flight.is_empty():
-		return fail(
-			MSError.NOT_READY,
-			"a purchase of %s is already in progress" % _purchase_in_flight
-		)
+		var waited := (Time.get_ticks_msec() - _purchase_started_ms) / 1000.0
+		if waited < PURCHASE_STALE_SECONDS:
+			return fail(
+				MSError.NOT_READY,
+				"a purchase of %s is already in progress" % _purchase_in_flight
+			)
+		# Play never answered that sheet. Its answer can still arrive and will
+		# still be delivered; it just stops blocking this one.
+		log.warn(service_name, (
+			"the purchase of %s never answered after %d s; starting %s anyway"
+			% [_purchase_in_flight, int(waited), product_name]
+		))
 	# A second purchase of something the player already owns is refused by the
 	# store anyway, with an error most games render as "something went wrong".
 	# Saying it here gives the game a chance to show the right thing instead.
@@ -156,6 +205,7 @@ func purchase(product_name: String, offer_token: String = "") -> Dictionary:
 			and has_entitlement(entitlement):
 		return fail(MSError.ALREADY_OWNED, "%s is already owned" % product_name)
 	_purchase_in_flight = product_name
+	_purchase_started_ms = Time.get_ticks_msec()
 	purchase_started.emit(product_name)
 	native.call_method("purchase", [store_id, str(product["type"]), offer_token])
 	return {}
@@ -182,6 +232,28 @@ func refresh_products() -> Dictionary:
 		return problem
 	native.call_method("queryProducts")
 	return {}
+
+
+## Connects to the store again if it is not connected — after a setup that
+## gave up, or a connection that dropped — and otherwise re-announces
+## [signal iap_ready]. Cheap; meant for a store screen to call as it opens, so a
+## player who launched the game off-line can still buy once they are back on.
+func reconnect() -> Dictionary:
+	var problem := guard("reconnect to the store")
+	if not problem.is_empty():
+		return problem
+	if native.has("reconnect"):
+		native.call_method("reconnect")
+	else:
+		# A bridge from before 2.3.0: initializeBilling is idempotent and
+		# answers billing_ready when the connection is already up.
+		native.call_method("initializeBilling", [JSON.stringify(_product_manifest())])
+	return {}
+
+
+## The product whose purchase sheet is open, or "" when none is.
+func get_purchase_in_flight() -> String:
+	return _purchase_in_flight
 
 
 # --- What the player owns -----------------------------------------------
@@ -267,6 +339,8 @@ func revoke_entitlement(entitlement: String) -> void:
 
 func _on_native_billing_ready() -> void:
 	_started = true
+	# A fresh connection gets a fresh set of retries for its price list.
+	_product_retries = 0
 	log.info(service_name, "billing connected")
 	iap_ready.emit()
 	refresh_products()
@@ -276,6 +350,8 @@ func _on_native_billing_ready() -> void:
 
 func _on_native_billing_failed(code: int, message: String) -> void:
 	_started = false
+	# Nothing can answer a sheet on a connection that is not there.
+	_purchase_in_flight = ""
 	var error := record(MSError.make(
 		MSError.BILLING_UNAVAILABLE, message, service_name, code
 	))
@@ -344,6 +420,19 @@ func _on_native_products_load_failed(code: int, message: String) -> void:
 		_translate(code), message, service_name, code
 	))
 	products_load_failed.emit(error)
+	# A price list that failed to load is a store with no BUY buttons. Off-line
+	# at launch is the usual cause, so ask again a few times rather than once.
+	if bool(error["recoverable"]) and _product_retries < PRODUCT_RETRY_SECONDS.size():
+		var delay: float = PRODUCT_RETRY_SECONDS[_product_retries]
+		_product_retries += 1
+		if _after(delay, _retry_products, _product_retry_queued):
+			_product_retry_queued = true
+			log.info(service_name, "asking for prices again in %d s" % int(delay))
+
+
+func _retry_products() -> void:
+	_product_retry_queued = false
+	refresh_products()
 
 
 func _on_native_purchase_updated(purchase_json: String) -> void:
@@ -378,6 +467,14 @@ func _handle_purchase(purchase: Dictionary) -> void:
 	var info: Dictionary = _catalogue.get(name, {})
 	enriched["price"] = float(info.get("price_micros", 0)) / 1000000.0
 	enriched["currency"] = str(info.get("currency", ""))
+	# ALREADY FINISHED WITH THE STORE IN AN EARLIER SESSION. A purchase the
+	# store reports as acknowledged was delivered before -- this is a restore
+	# (every launch re-reads what the account owns), not a sale. Games grant on
+	# it all the same (it is how a reinstall gets its purchase back); analytics
+	# must not count it as revenue again. Consumables are consumed rather than
+	# acknowledged, so a consumable is never "restored": one the store still
+	# reports was never finished, and is owed.
+	enriched["restored"] = bool(purchase.get("acknowledged", false))
 
 	if state == "pending":
 		log.info(service_name, "%s is pending payment" % name)
@@ -416,6 +513,11 @@ func _handle_purchase(purchase: Dictionary) -> void:
 
 
 func _on_native_purchase_failed(store_id: String, code: int, message: String) -> void:
+	if store_id.is_empty():
+		# A bridge from before 2.3.0 (or iOS) reports a consume or acknowledge
+		# that did not land here, with no product. Not a purchase that failed.
+		_on_native_purchase_finish_failed(store_id, code, message)
+		return
 	var product := config.get_product_by_store_id(store_id)
 	var name := str(product.get("name", store_id))
 	if name == _purchase_in_flight or store_id == _purchase_in_flight:
@@ -472,6 +574,41 @@ func _on_native_purchases_queried(purchases_json: String) -> void:
 		_announce_entitlements()
 	log.info(service_name, "restored %d purchase(s)" % restored.size())
 	purchases_restored.emit(restored)
+
+
+func _on_native_purchases_query_failed(code: int, message: String) -> void:
+	var error := record(MSError.make(_translate(code), message, service_name, code))
+	restore_failed.emit(error)
+
+
+## A consume or acknowledge did not land. The player has what they paid for;
+## what is at stake is the store's side (see the signal). A restore re-reads the
+## unfinished purchase and finishes it, and the delivery key stops it being
+## granted twice in this session.
+func _on_native_purchase_finish_failed(store_id: String, code: int, message: String) -> void:
+	var product := config.get_product_by_store_id(store_id)
+	var name := str(product.get("name", store_id))
+	var error := record(MSError.make(_translate(code), message, service_name, code))
+	purchase_finish_failed.emit(name, error)
+	if _finish_retries < FINISH_RETRY_LIMIT:
+		if _after(FINISH_RETRY_SECONDS, _retry_finish, _finish_retry_queued):
+			_finish_retries += 1
+			_finish_retry_queued = true
+
+
+func _retry_finish() -> void:
+	_finish_retry_queued = false
+	restore_purchases()
+
+
+## Runs `callback` after `seconds`, unless one is already queued. Returns
+## whether it was scheduled: a service outside the scene tree (a headless test)
+## has no timer to use, and simply does not retry.
+func _after(seconds: float, callback: Callable, queued: bool) -> bool:
+	if queued or not is_inside_tree():
+		return false
+	get_tree().create_timer(seconds).timeout.connect(callback)
+	return true
 
 
 func _on_native_purchase_consumed(_token: String, store_id: String) -> void:
@@ -542,4 +679,6 @@ func diagnostics() -> Dictionary:
 	report["products_unavailable"] = unavailable
 	report["entitlements"] = get_entitlements()
 	report["purchase_in_flight"] = _purchase_in_flight
+	report["product_retries"] = _product_retries
+	report["finish_retries"] = _finish_retries
 	return report

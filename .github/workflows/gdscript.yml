@@ -87,6 +87,11 @@ jobs:
             exit 1
           fi
 
+      # The Play products tool is Python, standard library only, and its tests
+      # replace Google with a fake: no key, no network.
+      - name: Test the Play products tool
+        run: python3 -m unittest discover -s tests -p "test_play_products.py" -v
+
       - name: Run the tests
         # GODOT LOGS A PARSE ERROR AND CARRIES ON, so `run_tests.gd` can exit 0
         # while half the SDK failed to compile — which is exactly what happened

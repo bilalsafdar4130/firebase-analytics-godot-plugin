@@ -40,3 +40,6 @@ export_presets.cfg
 # to sweep into an unrelated commit with `git add -A` after opening the addon in
 # an editor. Ignored so that cannot happen by accident.
 *.uid
+
+# Python bytecode from tools/play_products.py and its tests.
+__pycache__/
