@@ -3,6 +3,23 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## 2.3.1
+
+### Fixed
+
+- **The store read OFFLINE right after billing connected (2.3.0).** 2.3.0 turned
+  on Billing 8's automatic service reconnection on top of the bridge's own
+  reconnect, so the same client was connected from two places. Starting a
+  connection while one is already CONNECTING is answered with DEVELOPER_ERROR
+  "Client is already in the process of connecting to billing service", and
+  every one of those answers reached the game as `billing_failed` -- seen on a
+  device as "billing connected" followed by a stream of failures, a store
+  marked offline, and prices that never loaded. Automatic reconnection is off
+  again, a connection is only started from DISCONNECTED, a failed setup answer
+  that arrives while the client is connected or connecting is ignored, and
+  `MSIap` ignores a `billing_failed` while the native client reports itself
+  ready.
+
 ## 2.3.0
 
 A store that cannot get stuck, and products made from the repository.

@@ -349,6 +349,15 @@ func _on_native_billing_ready() -> void:
 
 
 func _on_native_billing_failed(code: int, message: String) -> void:
+	# A failure reported while the native client says it IS connected is a
+	# stale or duplicate answer (2.3.0's two reconnect paths produced a stream of
+	# DEVELOPER_ERROR "already in the process of connecting" right after billing
+	# connected). Believing it closed a store that was working.
+	if _started and bool(native.call_method("isReady", [], false)):
+		log.warn(service_name, (
+			"ignoring a billing failure (%d: %s): billing is connected" % [code, message]
+		))
+		return
 	_started = false
 	# Nothing can answer a sheet on a connection that is not there.
 	_purchase_in_flight = ""

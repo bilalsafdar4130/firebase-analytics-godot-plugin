@@ -42,9 +42,18 @@ import org.json.JSONObject
  *
  * THE CONNECTION DROPS AND MUST BE REBUILT. Play's service is a bound service
  * that goes away when Play updates itself — which happens while games are
- * running. Billing 8's automatic reconnection re-binds on the next call, and
- * [scheduleReconnect] backs off and retries on top of it; without them, a game
+ * running. [scheduleReconnect] backs off and retries; without it, a game
  * silently loses the ability to sell anything part-way through a session.
+ *
+ * ONE CONNECTION ATTEMPT AT A TIME, FROM ONE PLACE. 2.3.0 also switched on
+ * Billing 8's automatic service reconnection, so two mechanisms reconnected
+ * the same client: starting a connection while one was already CONNECTING is
+ * answered with DEVELOPER_ERROR "Client is already in the process of
+ * connecting", and each of those answers reached the game as billing failing
+ * — a store reading OFFLINE seconds after "billing connected". Automatic
+ * reconnection is off again, [connect] only starts from DISCONNECTED, and a
+ * failed answer that arrives while the client is connected or connecting is
+ * not a failure.
  *
  * A FAILED SETUP IS RETRIED TOO. The first connection fails for reasons that
  * clear up on their own — no network at launch, Play busy updating, the Play
@@ -144,46 +153,64 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 					.enableOneTimeProducts()
 					.build()
 			)
-			// Billing 8+: a call made while Play's service is disconnected
-			// re-binds first instead of failing with SERVICE_DISCONNECTED.
-			.enableAutoServiceReconnection()
+			// NOT .enableAutoServiceReconnection(): see "ONE CONNECTION ATTEMPT
+			// AT A TIME" above. Reconnecting is this class's job alone.
 			.build()
 		connect()
 	}
 
+	/** Starts a connection, only from DISCONNECTED: CONNECTED needs nothing, a
+	 * CONNECTING attempt will answer on [stateListener] by itself, and a CLOSED
+	 * client cannot be reused. */
 	private fun connect() {
 		val current = client ?: return
-		current.startConnection(object : BillingClientStateListener {
-			override fun onBillingSetupFinished(result: BillingResult) = safely("onBillingSetupFinished") {
-				if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-					reconnectDelayMs = RECONNECT_BASE_MS
-					setupFailures = 0
-					clearFailure()
-					logInfo("billing connected")
-					signal("billing_ready")
+		if (current.connectionState != BillingClient.ConnectionState.DISCONNECTED) return
+		current.startConnection(stateListener)
+	}
+
+	/** One listener for the client's whole life, rather than one per attempt. */
+	private val stateListener = object : BillingClientStateListener {
+		override fun onBillingSetupFinished(result: BillingResult) = safely("onBillingSetupFinished") {
+			val current = client
+			if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+				reconnectDelayMs = RECONNECT_BASE_MS
+				setupFailures = 0
+				clearFailure()
+				logInfo("billing connected")
+				signal("billing_ready")
+			} else if (current != null && (
+					current.isReady ||
+						current.connectionState == BillingClient.ConnectionState.CONNECTING
+				)) {
+				// A late or duplicate answer: the client is connected, or an
+				// attempt is on its way and will answer itself. Telling the
+				// game that billing failed would close a working store.
+				logWarn(
+					"ignoring a setup answer (${result.responseCode}: " +
+						"${result.debugMessage}); the client is connected or connecting"
+				)
+			} else {
+				setupFailures += 1
+				signal("billing_failed", result.responseCode, result.debugMessage)
+				if (setupFailures < SETUP_RETRY_LIMIT) {
+					logWarn(
+						"billing setup failed (${result.responseCode}); retry " +
+							"$setupFailures of ${SETUP_RETRY_LIMIT - 1} in ${reconnectDelayMs}ms"
+					)
+					scheduleReconnect()
 				} else {
-					setupFailures += 1
-					signal("billing_failed", result.responseCode, result.debugMessage)
-					if (setupFailures < SETUP_RETRY_LIMIT) {
-						logWarn(
-							"billing setup failed (${result.responseCode}); retry " +
-								"$setupFailures of ${SETUP_RETRY_LIMIT - 1} in ${reconnectDelayMs}ms"
-						)
-						scheduleReconnect()
-					} else {
-						logWarn("billing setup failed (${result.responseCode}); waiting for reconnect()")
-					}
+					logWarn("billing setup failed (${result.responseCode}); waiting for reconnect()")
 				}
 			}
+		}
 
-			override fun onBillingServiceDisconnected() = safely("onBillingServiceDisconnected") {
-				// Not an error to report to the game: Play updating itself
-				// disconnects every bound client on the device. Reconnect
-				// quietly, and only tell the game if it never comes back.
-				logWarn("billing disconnected; reconnecting in ${reconnectDelayMs}ms")
-				scheduleReconnect()
-			}
-		})
+		override fun onBillingServiceDisconnected() = safely("onBillingServiceDisconnected") {
+			// Not an error to report to the game: Play updating itself
+			// disconnects every bound client on the device. Reconnect
+			// quietly, and only tell the game if it never comes back.
+			logWarn("billing disconnected; reconnecting in ${reconnectDelayMs}ms")
+			scheduleReconnect()
+		}
 	}
 
 	private fun scheduleReconnect() {
