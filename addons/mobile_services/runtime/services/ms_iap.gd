@@ -506,6 +506,15 @@ func _handle_purchase(purchase: Dictionary) -> void:
 		_save_cache()
 		_announce_entitlements()
 
+	# THE GAME FIRST, THE STORE SECOND. `purchase_completed` is answered
+	# synchronously, so by the time the consume below is even asked for, the
+	# game has granted the pack and written its save. The other way round, a
+	# consume could reach Play while the coins existed only in memory -- and a
+	# consumed purchase is never delivered again.
+	if not already_delivered:
+		log.info(service_name, "%s purchased" % name)
+		purchase_completed.emit(enriched)
+
 	# Finish with the store. A consumable that is never consumed cannot be
 	# bought again; a non-consumable that is never acknowledged is REFUNDED
 	# automatically after three days. Both are silent until a player complains.
@@ -514,11 +523,6 @@ func _handle_purchase(purchase: Dictionary) -> void:
 			native.call_method("consume", [token])
 	elif not bool(purchase.get("acknowledged", false)) and bool(config.iap["auto_acknowledge"]):
 		native.call_method("acknowledge", [token])
-
-	if already_delivered:
-		return
-	log.info(service_name, "%s purchased" % name)
-	purchase_completed.emit(enriched)
 
 
 func _on_native_purchase_failed(store_id: String, code: int, message: String) -> void:

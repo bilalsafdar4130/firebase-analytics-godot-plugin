@@ -2,6 +2,7 @@ package com.bilalsafdar.godot.mobileservices.billing
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
@@ -55,6 +56,21 @@ import org.json.JSONObject
  * failed answer that arrives while the client is connected or connecting is
  * not a failure.
  *
+ * A CONNECTION THAT NEVER ANSWERS IS ABANDONED. The same device log shows why
+ * the duplicate attempts happened at all: the connection dropped seconds after
+ * "billing connected" and the attempt to rebuild it stayed CONNECTING for good.
+ * 2.3.1 then waited on it for ever -- [connect] refused to start over while it
+ * was CONNECTING, every price query was answered SERVICE_DISCONNECTED, and the
+ * store read OFFLINE on a phone that was online. An attempt Play has not
+ * answered in [CONNECT_TIMEOUT_MS] is now ended, a new client is built, and
+ * the game is told billing failed so its store can say so and ask again.
+ *
+ * NOTHING IS ASKED OF A CLIENT THAT IS NOT CONNECTED. A query sent to a
+ * disconnected client is answered SERVICE_DISCONNECTED, and 2.3.1 followed
+ * that answer with an EMPTY catalogue, which wiped prices the game already had.
+ * A query now waits for the connection (asking for one), a failed query
+ * reports only the failure, and a catalogue is only sent when Play answered.
+ *
  * A FAILED SETUP IS RETRIED TOO. The first connection fails for reasons that
  * clear up on their own — no network at launch, Play busy updating, the Play
  * account not signed in yet — and a store that gave up on the first answer
@@ -81,6 +97,15 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		 * always retried; a refusal six times in a row (about a minute) is a
 		 * device that will not sell anything until something changes. */
 		private const val SETUP_RETRY_LIMIT = 6
+
+		/** How long a connection attempt may stay CONNECTING before it is
+		 * given up and a new client tried. A healthy bind answers in well under
+		 * a second; one that has not answered in this long never does. */
+		private const val CONNECT_TIMEOUT_MS = 15_000L
+
+		/** Play's SERVICE_TIMEOUT code, sent to the game when an attempt is
+		 * abandoned. Written out: Play Billing has deprecated the constant. */
+		private const val SERVICE_TIMEOUT = -3
 	}
 
 	override fun getPluginName(): String = PLUGIN_NAME
@@ -106,8 +131,19 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		)
 	)
 
+	/** Read from the Godot thread by [isReady], written on the UI thread. */
+	@Volatile
 	private var client: BillingClient? = null
 	private val handler = Handler(Looper.getMainLooper())
+
+	/** Bumped for every new client. A listener answers only for the client it
+	 * was made for: an abandoned client's late answer is about a connection
+	 * nobody is waiting for any more. */
+	private var generation = 0
+
+	/** `SystemClock.elapsedRealtime()` when the current attempt started, or 0
+	 * when no attempt is outstanding. See [CONNECT_TIMEOUT_MS]. */
+	private var connectingSinceMs = 0L
 
 	/** Store id -> type, from mobile_services.cfg. Play needs the type on every
 	 * call, and the game only ever says the product name. */
@@ -128,6 +164,17 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	private var reconnectQueued = false
 	private var purchaseInFlight: String = ""
 
+	private val reconnectTask = Runnable {
+		safely("reconnect") {
+			reconnectQueued = false
+			if (client?.isReady != true) connect()
+		}
+	}
+
+	private val connectTimeoutTask = Runnable {
+		safely("connectTimeout") { onConnectTimeout() }
+	}
+
 	@UsedByGodot
 	fun initializeBilling(productsJson: String) = onUi("initializeBilling") {
 		productTypes.clear()
@@ -138,13 +185,32 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 				productTypes[id] = playType(type)
 			}
 		}
-		if (client != null) {
+		val current = client
+		if (current != null && current.connectionState != BillingClient.ConnectionState.CLOSED) {
 			// Idempotent, like every other initialize in this SDK.
-			if (client?.isReady == true) signal("billing_ready")
+			if (current.isReady) signal("billing_ready") else connect()
 			return@onUi
 		}
-		val activity = getActivity() ?: return@onUi
-		client = BillingClient.newBuilder(activity)
+		newClient() ?: return@onUi
+		connect()
+	}
+
+	/**
+	 * Builds a new client and makes it the current one, closing the old one.
+	 *
+	 * Only ever replaces a client that is CLOSED or whose attempt to connect
+	 * Play never answered -- neither can have a purchase sheet open.
+	 */
+	private fun newClient(): BillingClient? {
+		val activity = getActivity() ?: return null
+		val old = client
+		generation += 1
+		connectingSinceMs = 0L
+		handler.removeCallbacks(connectTimeoutTask)
+		if (old != null) {
+			safely("endConnection") { old.endConnection() }
+		}
+		val fresh = BillingClient.newBuilder(activity)
 			.setListener { result, purchases -> onPurchasesUpdated(result, purchases) }
 			// Mandatory since Billing 7. Both flavours, because a game with a
 			// subscription and a coin pack has both kinds of pending purchase.
@@ -156,23 +222,92 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 			// NOT .enableAutoServiceReconnection(): see "ONE CONNECTION ATTEMPT
 			// AT A TIME" above. Reconnecting is this class's job alone.
 			.build()
-		connect()
+		client = fresh
+		return fresh
 	}
 
-	/** Starts a connection, only from DISCONNECTED: CONNECTED needs nothing, a
-	 * CONNECTING attempt will answer on [stateListener] by itself, and a CLOSED
-	 * client cannot be reused. */
+	/**
+	 * Connects if a connection is needed, and never starts a second attempt
+	 * while one is under way.
+	 *
+	 * CONNECTED needs nothing. DISCONNECTED starts an attempt. CLOSED cannot be
+	 * reused, so it gets a new client. CONNECTING is left to answer by itself
+	 * -- unless it has been CONNECTING for [CONNECT_TIMEOUT_MS], which is an
+	 * attempt Play is never going to answer, and that gets a new client too.
+	 */
 	private fun connect() {
-		val current = client ?: return
-		if (current.connectionState != BillingClient.ConnectionState.DISCONNECTED) return
-		current.startConnection(stateListener)
+		var current = client ?: newClient() ?: return
+		when (current.connectionState) {
+			BillingClient.ConnectionState.CONNECTED -> return
+			BillingClient.ConnectionState.CLOSED -> current = newClient() ?: return
+			BillingClient.ConnectionState.CONNECTING -> {
+				if (connectingSinceMs == 0L) {
+					// Not an attempt this class started: give it the same time.
+					armConnectTimeout()
+					return
+				}
+				val waited = SystemClock.elapsedRealtime() - connectingSinceMs
+				if (waited < CONNECT_TIMEOUT_MS) return
+				logWarn("billing has been connecting for ${waited}ms; starting again with a new client")
+				current = newClient() ?: return
+			}
+		}
+		armConnectTimeout()
+		current.startConnection(listenerFor(generation))
 	}
 
-	/** One listener for the client's whole life, rather than one per attempt. */
-	private val stateListener = object : BillingClientStateListener {
+	private fun armConnectTimeout() {
+		connectingSinceMs = SystemClock.elapsedRealtime()
+		handler.removeCallbacks(connectTimeoutTask)
+		handler.postDelayed(connectTimeoutTask, CONNECT_TIMEOUT_MS)
+	}
+
+	private fun settleConnectTimeout() {
+		connectingSinceMs = 0L
+		handler.removeCallbacks(connectTimeoutTask)
+	}
+
+	/** Play has not answered the current attempt in [CONNECT_TIMEOUT_MS]. */
+	private fun onConnectTimeout() {
+		val current = client ?: return
+		if (current.isReady ||
+			current.connectionState != BillingClient.ConnectionState.CONNECTING
+		) {
+			return
+		}
+		logWarn("billing did not connect in ${CONNECT_TIMEOUT_MS}ms; abandoning the attempt")
+		newClient() ?: return
+		setupFailed(
+			SERVICE_TIMEOUT,
+			"Google Play did not answer the billing connection in ${CONNECT_TIMEOUT_MS / 1000} s"
+		)
+	}
+
+	/** Reports a setup that did not connect, and retries it with back-off. */
+	private fun setupFailed(code: Int, message: String) {
+		setupFailures += 1
+		signal("billing_failed", code, message)
+		if (setupFailures < SETUP_RETRY_LIMIT) {
+			logWarn(
+				"billing setup failed ($code); retry " +
+					"$setupFailures of ${SETUP_RETRY_LIMIT - 1} in ${reconnectDelayMs}ms"
+			)
+			scheduleReconnect()
+		} else {
+			logWarn("billing setup failed ($code); waiting for reconnect()")
+		}
+	}
+
+	/** The listener for one client. An answer for any other client is ignored. */
+	private fun listenerFor(owner: Int) = object : BillingClientStateListener {
 		override fun onBillingSetupFinished(result: BillingResult) = safely("onBillingSetupFinished") {
+			if (owner != generation) {
+				logWarn("ignoring a setup answer (${result.responseCode}) for a replaced client")
+				return@safely
+			}
 			val current = client
 			if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+				settleConnectTimeout()
 				reconnectDelayMs = RECONNECT_BASE_MS
 				setupFailures = 0
 				clearFailure()
@@ -183,28 +318,21 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 						current.connectionState == BillingClient.ConnectionState.CONNECTING
 				)) {
 				// A late or duplicate answer: the client is connected, or an
-				// attempt is on its way and will answer itself. Telling the
-				// game that billing failed would close a working store.
+				// attempt is on its way and will answer itself (the timeout
+				// bounds how long that is believed). Telling the game that
+				// billing failed would close a working store.
 				logWarn(
 					"ignoring a setup answer (${result.responseCode}: " +
 						"${result.debugMessage}); the client is connected or connecting"
 				)
 			} else {
-				setupFailures += 1
-				signal("billing_failed", result.responseCode, result.debugMessage)
-				if (setupFailures < SETUP_RETRY_LIMIT) {
-					logWarn(
-						"billing setup failed (${result.responseCode}); retry " +
-							"$setupFailures of ${SETUP_RETRY_LIMIT - 1} in ${reconnectDelayMs}ms"
-					)
-					scheduleReconnect()
-				} else {
-					logWarn("billing setup failed (${result.responseCode}); waiting for reconnect()")
-				}
+				settleConnectTimeout()
+				setupFailed(result.responseCode, result.debugMessage)
 			}
 		}
 
 		override fun onBillingServiceDisconnected() = safely("onBillingServiceDisconnected") {
+			if (owner != generation) return@safely
 			// Not an error to report to the game: Play updating itself
 			// disconnects every bound client on the device. Reconnect
 			// quietly, and only tell the game if it never comes back.
@@ -216,13 +344,14 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	private fun scheduleReconnect() {
 		if (reconnectQueued) return
 		reconnectQueued = true
-		handler.postDelayed({
-			safely("reconnect") {
-				reconnectQueued = false
-				if (client?.isReady != true) connect()
-			}
-		}, reconnectDelayMs)
+		handler.postDelayed(reconnectTask, reconnectDelayMs)
 		reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(RECONNECT_MAX_MS)
+	}
+
+	/** Asks for a connection from a Play callback, which may not be on the UI
+	 * thread. */
+	private fun connectSoon() {
+		handler.post { safely("connect") { connect() } }
 	}
 
 	/**
@@ -234,14 +363,13 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	 */
 	@UsedByGodot
 	fun reconnect() = onUi("reconnect") {
-		val current = client ?: return@onUi
-		if (current.isReady) {
+		if (client?.isReady == true) {
 			signal("billing_ready")
 			return@onUi
 		}
 		setupFailures = 0
 		reconnectDelayMs = RECONNECT_BASE_MS
-		handler.removeCallbacksAndMessages(null)
+		handler.removeCallbacks(reconnectTask)
 		reconnectQueued = false
 		connect()
 	}
@@ -265,14 +393,32 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	 */
 	@UsedByGodot
 	fun queryProducts() = onUi("queryProducts") {
-		val current = client ?: return@onUi
+		val current = client
+		if (current == null || !current.isReady) {
+			// Play would answer SERVICE_DISCONNECTED. Say so, and get the
+			// connection going: `billing_ready` asks for prices again.
+			signal(
+				"products_load_failed", BillingClient.BillingResponseCode.SERVICE_DISCONNECTED,
+				"billing is not connected yet; connecting"
+			)
+			connect()
+			return@onUi
+		}
+		val requests = listOf(BillingClient.ProductType.INAPP, BillingClient.ProductType.SUBS)
+			.map { type -> type to productTypes.filterValues { it == type }.keys }
+			.filter { it.second.isNotEmpty() }
+		if (requests.isEmpty()) {
+			finishCatalogue(emptyList(), emptyList())
+			return@onUi
+		}
 		val collected = ArrayList<JSONObject>()
 		val unfetched = ArrayList<JSONObject>()
-		var outstanding = 0
-		for (type in listOf(BillingClient.ProductType.INAPP, BillingClient.ProductType.SUBS)) {
-			val ids = productTypes.filterValues { it == type }.keys
-			if (ids.isEmpty()) continue
-			outstanding += 1
+		var failure: BillingResult? = null
+		var answered = 0
+		// Counted before the first query, so an answer that arrives at once
+		// cannot finish the catalogue while the other query is still out.
+		var outstanding = requests.size
+		for ((type, ids) in requests) {
 			val products = ids.map { id ->
 				QueryProductDetailsParams.Product.newBuilder()
 					.setProductId(id)
@@ -286,6 +432,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 			) { result, queried ->
 				safely("queryProducts($type)") {
 					if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+						answered += 1
 						for (item in queried.productDetailsList) {
 							details[item.productId] = item
 							collected.add(describe(item))
@@ -298,23 +445,33 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 								)
 							)
 						}
-					} else {
-						signal("products_load_failed", result.responseCode, result.debugMessage)
+					} else if (failure == null) {
+						failure = result
 					}
 					outstanding -= 1
 					if (outstanding == 0) {
-						finishCatalogue(collected, unfetched)
+						val failed = failure
+						if (failed != null) {
+							signal("products_load_failed", failed.responseCode, failed.debugMessage)
+							if (failed.responseCode == BillingClient.BillingResponseCode.SERVICE_DISCONNECTED) {
+								connectSoon()
+							}
+						}
+						// An empty list here would read as "Play sells nothing"
+						// and wipe the prices the game already has. Only an
+						// answer from Play is a catalogue.
+						if (answered > 0) {
+							finishCatalogue(collected, unfetched)
+						}
 					}
 				}
 			}
-		}
-		if (outstanding == 0) {
-			finishCatalogue(collected, unfetched)
 		}
 	}
 
 	/**
 	 * Reports the catalogue, and before it every product Play would not sell.
+	 * Only ever called with an answer Play actually gave: see [queryProducts].
 	 *
 	 * THE UNFETCHED LIST IS THE ANSWER TO "MY BUY BUTTON NEVER APPEARS". A
 	 * product id that does not match the Play Console, a product left inactive,
@@ -406,8 +563,13 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		onUi("purchase($storeId)") {
 			val current = client
 			val activity = getActivity()
-			if (current == null || activity == null) {
-				signal("purchase_failed", storeId, -1, "billing is not connected")
+			if (current == null || activity == null || !current.isReady) {
+				signal(
+					"purchase_failed", storeId,
+					BillingClient.BillingResponseCode.SERVICE_DISCONNECTED,
+					"billing is not connected; connecting"
+				)
+				connect()
 				return@onUi
 			}
 			val product = details[storeId]
@@ -521,13 +683,29 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	 */
 	@UsedByGodot
 	fun queryPurchases() = onUi("queryPurchases") {
-		val current = client ?: return@onUi
+		val current = client
+		if (current == null || !current.isReady) {
+			// Nothing is revoked on a failed restore, and `billing_ready`
+			// restores again once connected.
+			signal(
+				"purchases_query_failed", BillingClient.BillingResponseCode.SERVICE_DISCONNECTED,
+				"billing is not connected yet; connecting"
+			)
+			connect()
+			return@onUi
+		}
+		val types = listOf(BillingClient.ProductType.INAPP, BillingClient.ProductType.SUBS)
+			.filter { type -> productTypes.any { it.value == type } }
+		if (types.isEmpty()) {
+			signal("purchases_queried", Json.array(emptyList()))
+			return@onUi
+		}
 		val collected = ArrayList<JSONObject>()
 		var failure: BillingResult? = null
-		var outstanding = 0
-		for (type in listOf(BillingClient.ProductType.INAPP, BillingClient.ProductType.SUBS)) {
-			if (productTypes.none { it.value == type }) continue
-			outstanding += 1
+		// Counted before the first query, for the reason in [queryProducts]:
+		// an early answer must not report half of what the account owns.
+		var outstanding = types.size
+		for (type in types) {
 			current.queryPurchasesAsync(
 				QueryPurchasesParams.newBuilder().setProductType(type).build()
 			) { result, purchases ->
@@ -544,15 +722,15 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 						val failed = failure
 						if (failed != null) {
 							signal("purchases_query_failed", failed.responseCode, failed.debugMessage)
+							if (failed.responseCode == BillingClient.BillingResponseCode.SERVICE_DISCONNECTED) {
+								connectSoon()
+							}
 						} else {
 							signal("purchases_queried", Json.array(collected))
 						}
 					}
 				}
 			}
-		}
-		if (outstanding == 0) {
-			signal("purchases_queried", Json.array(collected))
 		}
 	}
 
@@ -641,6 +819,8 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		safely("onMainDestroy") {
 			handler.removeCallbacksAndMessages(null)
 			reconnectQueued = false
+			connectingSinceMs = 0L
+			generation += 1
 			client?.endConnection()
 			client = null
 		}

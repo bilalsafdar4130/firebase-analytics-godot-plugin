@@ -71,6 +71,8 @@ func run() -> Array[MSTestCase]:
 		_a_finish_failure_is_not_a_purchase_failure(),
 		_reconnect_asks_the_bridge(),
 		_a_stale_failure_does_not_close_a_connected_store(),
+		_a_failed_price_query_keeps_the_prices(),
+		_the_game_is_told_before_the_store_is(),
 	]
 	MSConfig.platform_override = ""
 	return cases
@@ -323,5 +325,49 @@ func _a_stale_failure_does_not_close_a_connected_store() -> MSTestCase:
 	fake.billing_failed.emit(3, "Billing unavailable")
 	test.check(not iap.is_ready(), "a real failure (not connected) still closes it")
 	test.equals(failures.size(), 1, "and is reported")
+	iap.free()
+	return test
+
+
+func _a_failed_price_query_keeps_the_prices() -> MSTestCase:
+	var test := MSTestCase.new("a price query that failed keeps the prices already loaded")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	fake.ready = true
+	fake.products_loaded.emit(JSON.stringify([
+		{"id": "remove_ads", "price": "Rs 280.00"},
+		{"id": "coins_small", "price": "Rs 140.00"},
+	]))
+	var failures := []
+	iap.products_load_failed.connect(func(e: Dictionary) -> void: failures.append(e))
+	# What a 2.3.2 bridge sends while it reconnects (2.3.1 followed it with an
+	# empty products_loaded, which wiped these prices: seen on a device).
+	fake.ready = false
+	fake.products_load_failed.emit(-1, "billing is not connected yet; connecting")
+	test.equals(failures.size(), 1, "the failure is reported")
+	test.equals(iap.get_catalogue().size(), 2, "the prices Play gave are still there")
+	test.equals(iap.get_product_info("remove_ads").get("price"), "Rs 280.00", "unchanged")
+	# The bridge abandoning an attempt Play never answered is a real failure.
+	fake.billing_failed.emit(-3, "Google Play did not answer the billing connection in 15 s")
+	test.check(not iap.is_ready(), "an abandoned connection closes the store")
+	iap.free()
+	return test
+
+
+
+func _the_game_is_told_before_the_store_is() -> MSTestCase:
+	var test := MSTestCase.new("a pack is granted before it is consumed with Play")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	var finished_first := []
+	iap.purchase_completed.connect(func(_p: Dictionary) -> void:
+		finished_first.append(fake.calls.has("consume")))
+	fake.purchase_updated.emit(JSON.stringify({
+		"product_id": "coins_small", "state": "purchased", "token": "t-order",
+	}))
+	test.equals(finished_first, [false], "purchase_completed comes before the consume")
+	test.check(fake.calls.has("consume"), "and the consume still happens")
 	iap.free()
 	return test

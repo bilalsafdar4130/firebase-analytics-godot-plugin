@@ -15,7 +15,7 @@ const SETTING_ENVIRONMENT := "mobile_services/config/environment"
 ## The addon's version, stated once. Read by both export plugins for the build
 ## log and by CI for release tagging. Must match `plugin.cfg` and
 ## `MobileServices.VERSION`; `tests/test_versions.gd` checks that it does.
-const VERSION := "2.3.1"
+const VERSION := "2.3.2"
 
 ## The ONE Godot version this SDK and every game using it are pinned to.
 ##

@@ -219,8 +219,8 @@ what can be retried by itself:
 | What happened | Signal | What the SDK already does | What the game should do |
 |---|---|---|---|
 | Billing did not connect (off-line at launch, Play updating, not signed in to Play) | `iap_failed(error)` | Retries six times with back-off, then waits | Call `reconnect()` when a store screen opens |
-| The connection dropped mid-session | — | Reconnects with back-off, one attempt at a time | Nothing |
-| The price list did not load | `products_load_failed(error)` | Asks again after 5 s, 20 s and 60 s | Show "…" on the BUY buttons, not an error |
+| The connection dropped mid-session | — | Reconnects with back-off, one attempt at a time; an attempt Play does not answer in 15 s is abandoned for a new client and reported on `iap_failed` | Nothing |
+| The price list did not load | `products_load_failed(error)` | Keeps the prices it already had; asks again after 5 s, 20 s and 60 s | Show "…" on the BUY buttons, not an error |
 | A product is not on sale | `products_unavailable(products)` | Logs Play's reason per product | No BUY button for it |
 | The player closed the sheet | `purchase_cancelled(product)` | — | Nothing. Not an error. |
 | The payment is pending | `purchase_pending(purchase)` | Delivers it on a later launch | Say so; grant nothing |
