@@ -3,6 +3,40 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## 2.3.2
+
+### Fixed
+
+- **The store stayed OFFLINE on a phone that was online (2.3.1).** The device
+  log behind 2.3.1 had a second half: the connection to Play dropped seconds
+  after "billing connected", and the attempt to rebuild it never answered.
+  2.3.1 waited on that attempt for the rest of the session -- `connect()`
+  refused to start over while it was CONNECTING, `reconnect()` (the store's TRY
+  AGAIN) did the same, and every price query was answered SERVICE_DISCONNECTED
+  ("Service connection is disconnected."). An attempt Play has not answered in
+  15 s is now ended, a new `BillingClient` is built, and `billing_failed` tells
+  the game (code -3) so its store can say so and ask again. Retries are the
+  same six with back-off, then `reconnect()`.
+- **A failed price query wiped the prices.** The bridge followed every failed
+  query with an empty `products_loaded`, which `MSIap` took as "Play sells
+  nothing": prices a game already showed disappeared after one network blip.
+  A failed query now reports `products_load_failed` only, and a catalogue is
+  sent only when Play answered.
+- **Queries no longer go to a client that is not connected.** Prices, restores
+  and purchases asked for while billing is reconnecting answer
+  SERVICE_DISCONNECTED straight away and start a connection; `billing_ready`
+  asks for prices and restores again once it is up.
+- **Both queries are counted before either is sent**, so a Play answer that
+  arrives at once cannot report half a catalogue or half of what an account
+  owns.
+- `reconnect()` now also works when the client was never built (no activity
+  yet at start-up) or was closed.
+
+### Tests
+
+- `tests/test_iap.gd`: a failed price query keeps the prices already loaded,
+  and an abandoned connection closes the store.
+
 ## 2.3.1
 
 ### Fixed
