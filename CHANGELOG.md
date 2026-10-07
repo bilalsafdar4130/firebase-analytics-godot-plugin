@@ -31,11 +31,18 @@ Semantic versioning: `MAJOR.MINOR.PATCH`. See
   owns.
 - `reconnect()` now also works when the client was never built (no activity
   yet at start-up) or was closed.
+- **A pack is granted before it is consumed.** `MSIap` asked Play to consume a
+  pack (or acknowledge a one-time product) and only then emitted
+  `purchase_completed`, so the consume could be on its way while the coins
+  existed only in memory -- and a consumed purchase is never delivered again.
+  The game is now told first; `purchase_completed` is answered synchronously,
+  so the grant and its save happen before the store is finished with.
 
 ### Tests
 
 - `tests/test_iap.gd`: a failed price query keeps the prices already loaded,
-  and an abandoned connection closes the store.
+  an abandoned connection closes the store, and `purchase_completed` comes
+  before the consume.
 
 ## 2.3.1
 
