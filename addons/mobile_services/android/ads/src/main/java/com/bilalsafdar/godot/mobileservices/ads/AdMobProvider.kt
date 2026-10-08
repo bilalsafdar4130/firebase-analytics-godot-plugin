@@ -47,6 +47,11 @@ internal class AdMobProvider(
 	private val banners = BannerHost(activity)
 	private val ads = HashMap<String, Entry>()
 
+	// The SDK throws if setAppMuted() runs before initialize() has finished,
+	// so a mute requested before then is held here and applied once it has.
+	@Volatile private var sdkStarted = false
+	@Volatile private var pendingMuted: Boolean? = null
+
 	private class Entry(
 		val format: String,
 		val unitId: String,
@@ -74,11 +79,15 @@ internal class AdMobProvider(
 				)
 			}
 			MobileAds.setRequestConfiguration(builder.build())
-			MobileAds.setAppMuted(config.muted)
+			if (pendingMuted == null) pendingMuted = config.muted
 			// initialize() answers on the main thread once the mediation
 			// adapters have reported in. It can take a second or two on a cold
 			// start, which is why nothing here is synchronous.
-			MobileAds.initialize(activity) { onReady() }
+			MobileAds.initialize(activity) {
+				sdkStarted = true
+				pendingMuted?.let { applyMuted(it) }
+				onReady()
+			}
 		} catch (error: Throwable) {
 			onFailed(error.message ?: error.javaClass.simpleName)
 		}
@@ -261,7 +270,20 @@ internal class AdMobProvider(
 	}
 
 	override fun setMuted(muted: Boolean) {
-		MobileAds.setAppMuted(muted)
+		if (!sdkStarted) {
+			pendingMuted = muted
+			return
+		}
+		applyMuted(muted)
+	}
+
+	// Muting is cosmetic, so a failure here must never take the ads down with it.
+	private fun applyMuted(muted: Boolean) {
+		try {
+			MobileAds.setAppMuted(muted)
+		} catch (error: Throwable) {
+			Log.w("MobileServicesAds", "setAppMuted failed", error)
+		}
 	}
 
 	/**
