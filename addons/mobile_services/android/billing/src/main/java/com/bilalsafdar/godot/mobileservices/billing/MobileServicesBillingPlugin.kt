@@ -1,5 +1,9 @@
 package com.bilalsafdar.godot.mobileservices.billing
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -78,6 +82,23 @@ import org.json.JSONObject
  * back-off, and the game can ask again at any time with [reconnect] (opening a
  * store screen is the natural moment).
  *
+ * A PRICE QUERY THAT NEVER ANSWERS IS A FAILED QUERY. Play Billing has no
+ * timeout of its own on `queryProductDetailsAsync`: on a phone whose mobile
+ * data has not finished coming up, the call can simply never call back, and a
+ * store waiting on it read CONNECTING for ever. A query unanswered after
+ * [QUERY_TIMEOUT_MS] is reported as `products_load_failed` (code -3), so the
+ * game's store says so and asks again. An answer that arrives later is still
+ * delivered: it is the prices the game wanted all along.
+ *
+ * THE NETWORK COMING BACK IS THE MOMENT TO ASK AGAIN. Opening the game on
+ * mobile data is the usual way to meet billing before the connection is usable:
+ * the first connect or price query fails, the back-off waits seconds to
+ * minutes, and the store sat on its error although the phone had been online
+ * for most of that. [watchNetwork] listens to Android's own connectivity
+ * callback (the standard way, rather than polling) and, the moment the default
+ * network becomes validated, reconnects billing or re-asks for prices if either
+ * is still missing. It does nothing when both are fine.
+ *
  * FINISHING A PURCHASE HAS ITS OWN FAILURE SIGNAL. A consume or acknowledge
  * that does not land is not a failed purchase — the player paid and has been
  * granted — so it is reported on `purchase_finish_failed`, never on
@@ -106,6 +127,15 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		/** Play's SERVICE_TIMEOUT code, sent to the game when an attempt is
 		 * abandoned. Written out: Play Billing has deprecated the constant. */
 		private const val SERVICE_TIMEOUT = -3
+
+		/** How long a price query may go unanswered before it is reported as
+		 * failed. Longer than a healthy answer (a second or two) and a slow
+		 * mobile one (a few seconds), shorter than a player waits. */
+		private const val QUERY_TIMEOUT_MS = 20_000L
+
+		/** The network callback can fire in bursts (Wi-Fi to mobile data and
+		 * back). At most one nudge to billing in this long. */
+		private const val NETWORK_NUDGE_MIN_MS = 5_000L
 	}
 
 	override fun getPluginName(): String = PLUGIN_NAME
@@ -159,6 +189,19 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	 * token belonged to on `purchase_consumed`/`purchase_acknowledged`. */
 	private val tokenStoreIds = HashMap<String, String>()
 
+	/** Android's default-network callback, once registered. See [watchNetwork]. */
+	private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+	/** Whether the default network was validated at the last callback, so only
+	 * a change to usable nudges billing and not every signal-strength update. */
+	@Volatile
+	private var networkUsable = false
+	private var lastNetworkNudgeMs = 0L
+
+	/** True once Play has answered a price query with a catalogue; false after a
+	 * failed or unanswered one. What [onNetworkUsable] checks. */
+	private var pricesLoaded = false
+
 	private var reconnectDelayMs = RECONNECT_BASE_MS
 	private var setupFailures = 0
 	private var reconnectQueued = false
@@ -177,6 +220,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 
 	@UsedByGodot
 	fun initializeBilling(productsJson: String) = onUi("initializeBilling") {
+		watchNetwork()
 		productTypes.clear()
 		for (entry in Json.toList(productsJson)) {
 			val id = entry["id"]?.toString().orEmpty()
@@ -348,6 +392,75 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(RECONNECT_MAX_MS)
 	}
 
+	/**
+	 * Registers for Android's default-network callback, once.
+	 *
+	 * Needs ACCESS_NETWORK_STATE (a normal permission, granted at install; the
+	 * export plugin adds it). Without it, or on any failure here, billing simply
+	 * keeps the retries it already had: this is an accelerator, never a
+	 * requirement.
+	 */
+	private fun watchNetwork() {
+		if (networkCallback != null) return
+		val manager = getActivity()?.getSystemService(Context.CONNECTIVITY_SERVICE)
+			as? ConnectivityManager ?: return
+		val callback = object : ConnectivityManager.NetworkCallback() {
+			override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+				val usable = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+					capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+				val wasUsable = networkUsable
+				networkUsable = usable
+				if (usable && !wasUsable) {
+					handler.post { safely("onNetworkUsable") { onNetworkUsable() } }
+				}
+			}
+
+			override fun onLost(network: Network) {
+				networkUsable = false
+			}
+		}
+		try {
+			manager.registerDefaultNetworkCallback(callback)
+			networkCallback = callback
+		} catch (error: Exception) {
+			logWarn("not watching the network (${error.javaClass.simpleName}); relying on retries")
+		}
+	}
+
+	private fun unwatchNetwork() {
+		val callback = networkCallback ?: return
+		networkCallback = null
+		networkUsable = false
+		val manager = getActivity()?.getSystemService(Context.CONNECTIVITY_SERVICE)
+			as? ConnectivityManager
+		try {
+			manager?.unregisterNetworkCallback(callback)
+		} catch (error: Exception) {
+			logWarn("could not stop watching the network (${error.javaClass.simpleName})")
+		}
+	}
+
+	/** The default network has just become usable. Runs on the UI thread. */
+	private fun onNetworkUsable() {
+		val current = client ?: return
+		val ready = current.isReady
+		if (ready && pricesLoaded) return
+		val now = SystemClock.elapsedRealtime()
+		if (now - lastNetworkNudgeMs < NETWORK_NUDGE_MIN_MS) return
+		lastNetworkNudgeMs = now
+		if (!ready) {
+			logInfo("network is usable and billing is not connected; reconnecting now")
+			setupFailures = 0
+			reconnectDelayMs = RECONNECT_BASE_MS
+			handler.removeCallbacks(reconnectTask)
+			reconnectQueued = false
+			connect()
+		} else {
+			logInfo("network is usable and prices are missing; asking Play again")
+			queryProducts()
+		}
+	}
+
 	/** Asks for a connection from a Play callback, which may not be on the UI
 	 * thread. */
 	private fun connectSoon() {
@@ -397,6 +510,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		if (current == null || !current.isReady) {
 			// Play would answer SERVICE_DISCONNECTED. Say so, and get the
 			// connection going: `billing_ready` asks for prices again.
+			pricesLoaded = false
 			signal(
 				"products_load_failed", BillingClient.BillingResponseCode.SERVICE_DISCONNECTED,
 				"billing is not connected yet; connecting"
@@ -418,6 +532,23 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 		// Counted before the first query, so an answer that arrives at once
 		// cannot finish the catalogue while the other query is still out.
 		var outstanding = requests.size
+		// Set once a failure has been reported for this query (by the watchdog
+		// or by Play), so the other of the two does not report it again.
+		var reported = false
+		val watchdog = Runnable {
+			safely("queryProductsTimeout") {
+				if (outstanding > 0 && !reported) {
+					reported = true
+					pricesLoaded = false
+					logWarn("Play has not answered the price query in ${QUERY_TIMEOUT_MS}ms")
+					signal(
+						"products_load_failed", SERVICE_TIMEOUT,
+						"Google Play did not answer the price query in ${QUERY_TIMEOUT_MS / 1000} s"
+					)
+				}
+			}
+		}
+		handler.postDelayed(watchdog, QUERY_TIMEOUT_MS)
 		for ((type, ids) in requests) {
 			val products = ids.map { id ->
 				QueryProductDetailsParams.Product.newBuilder()
@@ -450,9 +581,14 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 					}
 					outstanding -= 1
 					if (outstanding == 0) {
+						handler.removeCallbacks(watchdog)
 						val failed = failure
 						if (failed != null) {
-							signal("products_load_failed", failed.responseCode, failed.debugMessage)
+							if (!reported) {
+								reported = true
+								pricesLoaded = false
+								signal("products_load_failed", failed.responseCode, failed.debugMessage)
+							}
 							if (failed.responseCode == BillingClient.BillingResponseCode.SERVICE_DISCONNECTED) {
 								connectSoon()
 							}
@@ -481,6 +617,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	 * arrives.
 	 */
 	private fun finishCatalogue(collected: List<JSONObject>, unfetched: List<JSONObject>) {
+		pricesLoaded = true
 		if (unfetched.isNotEmpty()) {
 			signal("products_unfetched", Json.array(unfetched))
 		}
@@ -818,6 +955,7 @@ class MobileServicesBillingPlugin(godot: Godot) : MobileServicesPlugin(godot) {
 	override fun onMainDestroy() {
 		safely("onMainDestroy") {
 			handler.removeCallbacksAndMessages(null)
+			unwatchNetwork()
 			reconnectQueued = false
 			connectingSinceMs = 0L
 			generation += 1

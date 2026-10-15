@@ -47,7 +47,8 @@ const CACHE_PATH := "user://mobile_services_entitlements.cfg"
 ## is not on a timer; a late answer still delivers through `purchase_updated`.
 const PURCHASE_STALE_SECONDS := 180.0
 
-## Seconds before each automatic retry of a price list that failed to load.
+## Seconds before each automatic retry of a price list that failed to load; the
+## last one repeats for as long as the failures are recoverable.
 const PRODUCT_RETRY_SECONDS: Array[float] = [5.0, 20.0, 60.0]
 
 ## Restores run to finish a consume or acknowledge that did not land, at most
@@ -430,9 +431,11 @@ func _on_native_products_load_failed(code: int, message: String) -> void:
 	))
 	products_load_failed.emit(error)
 	# A price list that failed to load is a store with no BUY buttons. Off-line
-	# at launch is the usual cause, so ask again a few times rather than once.
-	if bool(error["recoverable"]) and _product_retries < PRODUCT_RETRY_SECONDS.size():
-		var delay: float = PRODUCT_RETRY_SECONDS[_product_retries]
+	# at launch is the usual cause, so keep asking, backing off to the last
+	# interval and staying there: giving up after a few tries left a phone that
+	# came online a minute late with no prices until the store was reopened.
+	if bool(error["recoverable"]):
+		var delay: float = PRODUCT_RETRY_SECONDS[mini(_product_retries, PRODUCT_RETRY_SECONDS.size() - 1)]
 		_product_retries += 1
 		if _after(delay, _retry_products, _product_retry_queued):
 			_product_retry_queued = true

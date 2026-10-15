@@ -3,6 +3,24 @@
 Semantic versioning: `MAJOR.MINOR.PATCH`. See
 [`docs/release.md`](docs/release.md).
 
+## Unreleased
+
+### Fixed
+
+- **The store stayed on CAN'T REACH / CONNECTING GOOGLE PLAY after opening the
+  game on mobile data.** Three gaps, each closed the standard way:
+  - Billing now listens to Android's default-network callback
+    (`ConnectivityManager.registerDefaultNetworkCallback`). The moment the
+    network becomes validated it reconnects billing, or re-asks for prices, if
+    either is missing -- instead of waiting out the back-off. Needs
+    `ACCESS_NETWORK_STATE`, which the export plugin now adds (a normal
+    permission, no prompt); without it billing keeps its previous retries.
+  - A price query Play never answers (it has no timeout of its own) is reported
+    as `products_load_failed` (code -3) after 20 s, so the store stops reading
+    CONNECTING for ever and asks again. A late answer is still delivered.
+  - `MSIap` no longer stops re-asking for prices after three failures; it keeps
+    going at the last interval (60 s) while the failure is recoverable.
+
 ## 2.3.2
 
 ### Fixed
