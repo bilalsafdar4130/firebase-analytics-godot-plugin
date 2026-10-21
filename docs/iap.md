@@ -128,6 +128,15 @@ different country than their phone's language.
 The catalogue is empty until `products_loaded`, so build store screens from the
 signal rather than on `_ready`.
 
+**Do not gate the shelves on a live connection.** Billing drops and reconnects
+by itself (Play updating, the app in the background, a network change), and a
+store that shows STORE OFFLINE whenever `is_ready()` is false flickers for no
+reason a player can see. Show the shelves from the last prices Play quoted --
+keep them, and write them to disk if the store should open with no signal --
+and require a live connection only to *buy* (`purchase()` refuses, and
+`reconnect()` brings billing back). A remembered price is display only; Play
+charges what Play says.
+
 ## Consumables are never granted twice
 
 A consumable is delivered once, on `purchase_completed`, and consumed with the

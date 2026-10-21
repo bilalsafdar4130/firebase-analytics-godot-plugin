@@ -72,6 +72,7 @@ func run() -> Array[MSTestCase]:
 		_reconnect_asks_the_bridge(),
 		_a_stale_failure_does_not_close_a_connected_store(),
 		_a_failed_price_query_keeps_the_prices(),
+		_an_empty_price_answer_keeps_the_prices(),
 		_the_game_is_told_before_the_store_is(),
 	]
 	MSConfig.platform_override = ""
@@ -325,6 +326,23 @@ func _a_stale_failure_does_not_close_a_connected_store() -> MSTestCase:
 	fake.billing_failed.emit(3, "Billing unavailable")
 	test.check(not iap.is_ready(), "a real failure (not connected) still closes it")
 	test.equals(failures.size(), 1, "and is reported")
+	iap.free()
+	return test
+
+
+func _an_empty_price_answer_keeps_the_prices() -> MSTestCase:
+	var test := MSTestCase.new("an empty price answer keeps the prices already loaded")
+	var pair := _started_iap()
+	var iap: MSIap = pair[0]
+	var fake: FakeBilling = pair[1]
+	fake.products_loaded.emit(JSON.stringify([
+		{"id": "remove_ads", "price": "Rs 280.00"},
+	]))
+	# A Play that is mid-reconnect can answer a query with nothing. That used to
+	# wipe the list, and every store built on it read STORE OFFLINE.
+	fake.products_loaded.emit(JSON.stringify([]))
+	test.equals(iap.get_catalogue().size(), 1, "the last good list survives an empty answer")
+	test.equals(iap.get_product_info("remove_ads").get("price"), "Rs 280.00", "unchanged")
 	iap.free()
 	return test
 

@@ -30,14 +30,19 @@ extends MSService
 ##
 ## WHAT THIS CANNOT DO. Entitlements are cached on the device
 ## ([constant CACHE_PATH]) so a player who is off-line still owns what they
-## bought, and a device cache is editable by anyone who wants to edit it. For a
-## game where that matters, verify purchases on a server: `purchase_completed`
+## bought. The cache is sealed with an HMAC keyed by a per-install secret, so
+## editing the file no longer grants anything, but a rooted device can read the
+## secret too. For a game where that matters, verify purchases on a server: `purchase_completed`
 ## carries the token to verify with, and `grant_entitlement` /
 ## `revoke_entitlement` let a backend have the last word. See docs/iap.md.
 
 ## Where owned entitlements are remembered between launches. `user://` rather
 ## than `res://`, because it is written at runtime.
 const CACHE_PATH := "user://mobile_services_entitlements.cfg"
+
+## Where this install's cache-sealing secret is kept. See [method _cache_seal].
+const SEAL_KEY_PATH := "user://.mobile_services_seal"
+const SEAL_SALT := "mobile-services/entitlements/v1"
 
 ## How long a purchase sheet may stay unanswered before a new purchase is
 ## allowed anyway. Play answers every sheet it opens, but an activity torn down
@@ -369,7 +374,13 @@ func _on_native_billing_failed(code: int, message: String) -> void:
 
 
 func _on_native_products_loaded(products_json: String) -> void:
-	_catalogue.clear()
+	# BUILT ASIDE, THEN SWAPPED IN. The list used to be emptied first, so any
+	# refresh -- or an empty answer from a Play that was mid-reconnect -- left the
+	# game with no prices until the next good answer, and a store built on
+	# `get_catalogue()` showed STORE OFFLINE for it. An empty answer now keeps the
+	# last good list.
+	var previous := _catalogue
+	_catalogue = {}
 	for entry in parse_array(products_json):
 		if not (entry is Dictionary):
 			continue
@@ -385,6 +396,9 @@ func _on_native_products_loaded(products_json: String) -> void:
 		# A product that is on sale now is not unavailable, whatever an earlier
 		# query said — a refresh that fetches everything sends no unfetched list.
 		_unavailable.erase(str(product["name"]))
+	if _catalogue.is_empty() and not previous.is_empty():
+		log.warn(service_name, "the store returned no prices; keeping the last list")
+		_catalogue = previous
 	log.info(service_name, "%d product(s) priced by the store" % _catalogue.size())
 	products_loaded.emit(get_catalogue())
 
@@ -642,22 +656,62 @@ func _announce_entitlements() -> void:
 
 
 func _load_cache() -> void:
+	# Asked BEFORE anything can create the secret: has this install sealed its
+	# cache before? If so, a cache with no seal had it stripped.
+	var sealed_before := FileAccess.file_exists(SEAL_KEY_PATH)
 	var file := ConfigFile.new()
 	if file.load(CACHE_PATH) != OK:
 		return
 	if not file.has_section("entitlements"):
 		return
+	var loaded := {}
 	for entitlement in file.get_section_keys("entitlements"):
 		var value = file.get_value("entitlements", entitlement, {})
 		if value is Dictionary:
-			_entitlements[entitlement] = value
+			loaded[entitlement] = value
+	# THE CACHE IS SEALED. It is a file on the device, and "remove_ads" in it
+	# used to be all it took to own it. The seal is an HMAC keyed by a secret this
+	# install made, so an edited cache no longer matches and is ignored -- the
+	# purchase is then re-read from Google Play (`restore_on_start`), which is the
+	# only authority on what this account owns.
+	var tag := str(file.get_value("seal", "tag", ""))
+	var ok := true
+	if tag.is_empty():
+		ok = not (sealed_before and not OS.has_feature("editor"))
+	else:
+		ok = tag == _cache_seal(loaded)
+	if not ok:
+		log.warn(service_name, "the entitlement cache did not match its seal; ignoring it")
+		return
+	_entitlements = loaded
 	log.debug(service_name, "%d entitlement(s) restored from cache" % _entitlements.size())
+
+
+## HMAC-SHA256 over the entitlements, keyed by a per-install secret.
+func _cache_seal(entitlements: Dictionary) -> String:
+	var key: PackedByteArray
+	var nonce := PackedByteArray()
+	if FileAccess.file_exists(SEAL_KEY_PATH):
+		var existing := FileAccess.open(SEAL_KEY_PATH, FileAccess.READ)
+		if existing != null:
+			nonce = existing.get_buffer(32)
+	if nonce.size() != 32:
+		nonce = Crypto.new().generate_random_bytes(32)
+		var out := FileAccess.open(SEAL_KEY_PATH, FileAccess.WRITE)
+		if out != null:
+			out.store_buffer(nonce)
+	key = (SEAL_SALT + nonce.hex_encode()).sha256_buffer()
+	var digest := Crypto.new().hmac_digest(
+		HashingContext.HASH_SHA256, key, JSON.stringify(entitlements, "", true).to_utf8_buffer()
+	)
+	return Marshalls.raw_to_base64(digest)
 
 
 func _save_cache() -> void:
 	var file := ConfigFile.new()
 	for entitlement in _entitlements:
 		file.set_value("entitlements", entitlement, _entitlements[entitlement])
+	file.set_value("seal", "tag", _cache_seal(_entitlements))
 	var err := file.save(CACHE_PATH)
 	if err != OK:
 		log.warn(service_name, "could not write the entitlement cache (error %d)" % err)

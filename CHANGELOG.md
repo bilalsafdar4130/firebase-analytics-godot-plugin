@@ -5,7 +5,22 @@ Semantic versioning: `MAJOR.MINOR.PATCH`. See
 
 ## Unreleased
 
+### Security
+
+- **The entitlement cache is sealed.** `user://mobile_services_entitlements.cfg`
+  used to be plain text, so adding `remove_ads` to it granted it. It now carries
+  an HMAC-SHA256 seal keyed by a per-install secret; an edited cache (or one
+  whose seal was stripped, on an install that has sealed before) is ignored and
+  the entitlement is re-read from Google Play. Honest limit: a rooted device can
+  read the secret too -- verify on a server where that matters.
+
 ### Fixed
+
+- **STORE OFFLINE that came and went on its own.** `MSIap` emptied its price
+  list before reading Play's answer, so an empty `products_loaded` (Play
+  mid-reconnect) left the game with no prices. The list is now built aside and
+  an empty answer keeps the last good one. Games should also keep showing the
+  last prices while billing reconnects (see docs/iap.md).
 
 - **The store stayed on CAN'T REACH / CONNECTING GOOGLE PLAY after opening the
   game on mobile data.** Three gaps, each closed the standard way:
