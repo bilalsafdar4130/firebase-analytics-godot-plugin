@@ -5,6 +5,22 @@ Semantic versioning: `MAJOR.MINOR.PATCH`. See
 
 ## Unreleased
 
+### Fixed
+
+- **An `ERROR:` line in every game's `--import` log.** Godot asks the Android
+  export plugin `_supports_platform` outside any export (editor start, headless
+  import); `get_option` then has no preset and the engine logs
+  `Condition "export_preset.is_null()" is true`. The plugin already returned
+  false for that case, but only after asking. It now checks
+  `get_export_preset()` first, which answers null silently.
+
+### Licence
+
+- README stated MIT while `LICENSE` is proprietary. The README now matches the
+  licence (all rights reserved), `LICENSE` covers the whole repository rather
+  than only the 1.x Firebase bridge, and a `NOTICE` lists the third-party SDKs
+  the addon talks to and their licences.
+
 ### Security
 
 - **The entitlement cache is sealed.** `user://mobile_services_entitlements.cfg`

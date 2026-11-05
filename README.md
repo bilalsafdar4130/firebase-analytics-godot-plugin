@@ -5,7 +5,8 @@ identity and a consent flow — on **Android and iOS**, from **one GDScript API*
 with the **native sources in this repository** and no downloaded plugin binaries
 anywhere in the chain.
 
-Copyright © 2026 Bilal Safdar. MIT — see `LICENSE`.
+Copyright © 2026 Bilal Safdar (trading as Enigvra Studio). All rights reserved.
+This is proprietary software, not open source — see `LICENSE` and `NOTICE`.
 
 ```gdscript
 func _ready() -> void:

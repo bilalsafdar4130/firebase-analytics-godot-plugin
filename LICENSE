@@ -1,32 +1,61 @@
-Copyright © 2026 Bilal Safdar. All rights reserved.
+Mobile Services for Godot -- Proprietary Software Licence
+========================================================
 
-This addon — the GDScript export plugin, the Kotlin bridge, the Gradle project
-and the build script in this folder — is original work owned by Bilal Safdar.
-It is not open-source software: no permission is granted to any person to use,
-copy, modify, publish, distribute, sublicense or sell it, in whole or in part,
-except by the Owner's prior express written consent.
+Copyright (c) 2026 Bilal Safdar (trading as Enigvra Studio). All rights reserved.
 
-It is deliberately kept self-contained so the Owner can reuse it across their
-own projects. Copying it into another of the Owner's projects is expressly
-permitted; copying it out to anyone else is not.
 
-THIRD-PARTY COMPONENTS THIS ADDON TALKS TO, and which are not covered here:
+1. OWNERSHIP
 
-  Firebase SDK for Android (com.google.firebase:firebase-analytics)
-      Apache License 2.0, plus Google's Firebase terms. Not redistributed by
-      this addon: it is declared as a dependency and fetched by the app's own
-      Gradle build.
+   This repository and everything in it -- the GDScript runtime and editor
+   plugins, the Kotlin Android bridges (core, Firebase, ads, billing, Play
+   Games, consent), the Objective-C++ iOS bridges, the Gradle and build
+   scripts, the tools (including play_products.py), the tests, the demo
+   project and the documentation -- is original work owned by Bilal Safdar
+   ("the Owner"), except for the third-party components listed in NOTICE.
 
-  Godot Engine Android library (org.godotengine:godot)
-      MIT. Not redistributed either — the bridge compiles against the library
-      already present in the Godot Android build template, and the engine
-      supplies it at runtime.
 
-Neither is bundled into the AAR this folder produces, and neither places any
-restriction on the ownership stated above.
+2. NOT OPEN SOURCE
 
-THE ADDON IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED. IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH IT.
+   No permission is granted to any person to use, copy, modify, merge,
+   publish, distribute, sublicense or sell this software, in whole or in part,
+   except with the Owner's prior express written consent, and except as
+   section 3 allows.
 
-Bilal Safdar — bilalsafdar3014@gmail.com
+   This repository is publicly visible. Publishing it on GitHub grants other
+   GitHub users only the rights GitHub's Terms of Service require (to view it
+   and to fork it within GitHub); it grants no right to use, build, ship or
+   redistribute it anywhere else.
+
+
+3. THE OWNER'S OWN PROJECTS
+
+   The addon is deliberately self-contained so the Owner can reuse it across
+   the Owner's own games and apps. Copying it, or adding this repository as a
+   git submodule, into another of the Owner's projects is expressly permitted;
+   those projects ship it under their own licences. Copying it out to anyone
+   else is not permitted.
+
+
+4. THIRD-PARTY COMPONENTS
+
+   The addon talks to third-party SDKs that carry their own licences (see
+   NOTICE). It does not redistribute them: each is declared as a dependency and
+   fetched by the app's own Gradle or CocoaPods build. Those licences govern
+   those components only and grant no rights in the Owner's work.
+
+
+5. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   OWNER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM, OUT
+   OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+
+6. RESERVATION OF RIGHTS
+
+   All rights not expressly granted here are reserved by the Owner.
+
+
+Bilal Safdar -- bilalsafdar3014@gmail.com
