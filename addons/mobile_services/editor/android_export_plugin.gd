@@ -139,12 +139,17 @@ func _ensure_config(debug: bool) -> void:
 ## Android, and only when the Gradle build is on.
 ##
 ## Godot also asks this OUTSIDE any preset — while the editor starts, and on
-## every headless `--import`. There is no preset to read options from then, so
-## `get_option` answers with a null Variant, and reading one as a value
-## ("Nonexistent 'bool' constructor") turns an ordinary editor launch into
-## script errors. No preset means nothing to answer with.
+## every headless `--import`. There is no preset to read options from then:
+## `get_option` answers with a null Variant (reading one as a value, "Nonexistent
+## 'bool' constructor", turns an ordinary editor launch into script errors), and
+## the engine itself logs `Condition "export_preset.is_null()" is true` for the
+## call -- an ERROR line in every game's import log, for nothing. So ask whether
+## there is a preset first: `get_export_preset()` answers null without a word.
+## No preset means nothing to answer with.
 func _supports_platform(platform: EditorExportPlatform) -> bool:
 	if not (platform is EditorExportPlatformAndroid):
+		return false
+	if get_export_preset() == null:
 		return false
 	var gradle_build = get_option("gradle_build/use_gradle_build")
 	if gradle_build == null:

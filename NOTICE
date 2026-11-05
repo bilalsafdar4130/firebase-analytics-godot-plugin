@@ -1,0 +1,26 @@
+Mobile Services for Godot -- Third-Party Notices
+=================================================
+
+Copyright (c) 2026 Bilal Safdar. The addon itself is proprietary; see LICENSE.
+
+The addon declares the SDKs below as build dependencies (exact versions:
+docs/versions.md). None is stored in or redistributed from this repository;
+an app's own build fetches only the ones its mobile_services.cfg switches on.
+
+Godot Engine 4.7 -- MIT. The bridges compile against the engine library from
+    the Godot Android build template, which the engine supplies at runtime.
+Firebase Analytics, Crashlytics, Remote Config (com.google.firebase:*) --
+    Apache License 2.0, plus the Firebase Terms of Service.
+Google Mobile Ads SDK (com.google.android.gms:play-services-ads) -- Google
+    Mobile Ads SDK terms / Android SDK License Agreement.
+AppLovin MAX SDK (com.applovin:applovin-sdk) -- AppLovin's SDK terms.
+Google Play Billing Library (com.android.billingclient:billing) -- Android
+    Software Development Kit License Agreement.
+Play Games Services v2 (com.google.android.gms:play-services-games-v2) --
+    Android SDK License Agreement / Google APIs Terms of Service.
+Google User Messaging Platform (com.google.android.ump:user-messaging-platform)
+    -- Google's UMP SDK terms.
+AndroidX, Kotlin standard library and kotlinx -- Apache License 2.0.
+Apple frameworks (StoreKit, GameKit, AppTrackingTransparency) and the iOS
+    Firebase / Google Mobile Ads / UMP pods -- Apple's Xcode and SDK agreement,
+    and the same Google terms as their Android counterparts.
